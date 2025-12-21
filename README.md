@@ -28,7 +28,7 @@
 ### uvを使用（推奨）
 
 ```bash
-git clone https://github.com/yourusername/meeting-transcriber.git
+git clone https://github.com/h-wata/meeting-transcriber.git
 cd meeting-transcriber
 uv sync
 ```
