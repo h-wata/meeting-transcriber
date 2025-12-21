@@ -130,7 +130,7 @@ class MinutesUpdater:
         start_time: datetime,
         filename_format: str = 'meeting_%Y%m%d_%H%M%S',
         version_history: bool = False,
-        obsidian_mode: bool = False,
+        simple_mode: bool = False,
     ) -> None:
         self.generator = generator
         self.output_dir = output_dir
@@ -138,7 +138,7 @@ class MinutesUpdater:
         self.start_time = start_time
         self.filename_format = filename_format
         self.version_history = version_history
-        self.obsidian_mode = obsidian_mode
+        self.simple_mode = simple_mode
 
         self.last_update_index = 0
         self.update_count = 0
@@ -148,7 +148,7 @@ class MinutesUpdater:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # セッションディレクトリ（通常モード）
-        if not obsidian_mode:
+        if not simple_mode:
             self.session_dir = output_dir / start_time.strftime(filename_format)
             self.session_dir.mkdir(parents=True, exist_ok=True)
             if version_history:
@@ -208,7 +208,7 @@ class MinutesUpdater:
             self.last_update_index = len(transcripts)
 
             # バージョン履歴を保存
-            if self.version_history and not self.obsidian_mode:
+            if self.version_history and not self.simple_mode:
                 self._save_version()
 
             return UpdateResult(
@@ -239,8 +239,8 @@ class MinutesUpdater:
 
     def save(self, transcripts: list[TranscriptEntry]) -> Path:
         """議事録と文字起こしを保存する."""
-        if self.obsidian_mode:
-            # Obsidianモード: 単一ファイル
+        if self.simple_mode:
+            # シンプルモード: 単一ファイル
             filename = self.start_time.strftime(self.filename_format) + '.md'
             minutes_path = self.output_dir / filename
             minutes_path.write_text(self.current_minutes, encoding='utf-8')
@@ -263,7 +263,7 @@ class MinutesUpdater:
 
     def save_transcript_only(self, transcripts: list[TranscriptEntry]) -> Path:
         """文字起こしのみを保存する."""
-        if self.obsidian_mode:
+        if self.simple_mode:
             filename = self.start_time.strftime(self.filename_format) + '_transcript.txt'
             path = self.output_dir / filename
         else:

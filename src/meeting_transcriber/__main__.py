@@ -169,15 +169,10 @@ def parse_args() -> argparse.Namespace:
         help='出力ファイル名フォーマット',
     )
     parser.add_argument(
-        '--obsidian-vault',
+        '--simple-output',
         type=Path,
         default=None,
-        help='Obsidian Vaultのパス',
-    )
-    parser.add_argument(
-        '--obsidian-folder',
-        default=None,
-        help='Vault内のサブフォルダ',
+        help='シンプル出力モード（単一ファイルを直接出力）',
     )
     parser.add_argument(
         '--open-after',
@@ -274,10 +269,8 @@ def main() -> int:
         merge_kwargs['output_dir'] = args.output.expanduser()
     if args.filename:
         merge_kwargs['filename_format'] = args.filename
-    if args.obsidian_vault:
-        merge_kwargs['obsidian_vault'] = args.obsidian_vault.expanduser()
-    if args.obsidian_folder:
-        merge_kwargs['obsidian_folder'] = args.obsidian_folder
+    if args.simple_output:
+        merge_kwargs['simple_output_dir'] = args.simple_output.expanduser()
     if args.open_after:
         merge_kwargs['open_after'] = True
     if args.template:

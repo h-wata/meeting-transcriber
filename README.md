@@ -9,7 +9,7 @@
 - TUIインターフェース（Lazygit風の3パネル構成）
 - 差分更新による効率的な議事録更新
 - 複数のテンプレート対応（デフォルト、1on1、ブレスト、スタンドアップ、クライアント）
-- Obsidian連携
+- シンプル出力モード（単一ファイル出力）
 
 ## 必要要件
 
@@ -127,10 +127,12 @@ meeting-transcriber -t standup
 meeting-transcriber -t client
 ```
 
-### Obsidian連携
+### シンプル出力モード
+
+セッションディレクトリを作成せず、単一のMarkdownファイルを直接出力します。
 
 ```bash
-meeting-transcriber --obsidian-vault ~/Documents/Obsidian/MyVault --obsidian-folder meetings
+meeting-transcriber --simple-output ~/Documents/meetings/
 ```
 
 ## コマンドラインオプション
@@ -150,8 +152,7 @@ Whisper設定:
 出力:
   -o, --output PATH                          出力ディレクトリ
   -f, --filename FORMAT                      ファイル名フォーマット
-  --obsidian-vault PATH                      Obsidian Vaultパス
-  --obsidian-folder NAME                     Vault内サブフォルダ
+  --simple-output PATH                       シンプル出力モード（単一ファイル出力）
 
 テンプレート:
   -t, --template NAME                        テンプレート名

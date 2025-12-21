@@ -73,8 +73,7 @@ class Config:
     # 出力設定
     output_dir: Path = field(default_factory=lambda: Path('./output'))
     filename_format: str = 'meeting_%Y%m%d_%H%M%S'
-    obsidian_vault: Path | None = None
-    obsidian_folder: str = 'meetings'
+    simple_output_dir: Path | None = None
     open_after: bool = False
 
     # テンプレート設定
@@ -88,8 +87,8 @@ class Config:
 
     def get_output_path(self) -> Path:
         """実際の出力先パスを取得."""
-        if self.obsidian_vault:
-            return self.obsidian_vault / self.obsidian_folder
+        if self.simple_output_dir:
+            return self.simple_output_dir
         return self.output_dir
 
     def get_template_path(self) -> Path:
@@ -108,8 +107,8 @@ class Config:
         # パスの展開
         if 'output_dir' in data:
             data['output_dir'] = Path(data['output_dir']).expanduser()
-        if 'obsidian_vault' in data and data['obsidian_vault']:
-            data['obsidian_vault'] = Path(data['obsidian_vault']).expanduser()
+        if 'simple_output_dir' in data and data['simple_output_dir']:
+            data['simple_output_dir'] = Path(data['simple_output_dir']).expanduser()
         if 'templates_dir' in data:
             data['templates_dir'] = Path(data['templates_dir']).expanduser()
 
@@ -140,8 +139,7 @@ class Config:
             'backend': self.backend,
             'output_dir': self.output_dir,
             'filename_format': self.filename_format,
-            'obsidian_vault': self.obsidian_vault,
-            'obsidian_folder': self.obsidian_folder,
+            'simple_output_dir': self.simple_output_dir,
             'open_after': self.open_after,
             'template': self.template,
             'templates_dir': self.templates_dir,

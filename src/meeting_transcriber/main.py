@@ -67,7 +67,7 @@ class MeetingTranscriber:
             start_time=self.start_time,
             filename_format=config.filename_format,
             version_history=config.version_history,
-            obsidian_mode=config.obsidian_vault is not None,
+            simple_mode=config.simple_output_dir is not None,
         )
 
     def run_tui(self) -> None:
