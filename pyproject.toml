@@ -1,0 +1,75 @@
+[project]
+name = "meeting-transcriber"
+version = "0.1.0"
+description = "リアルタイム議事録生成ツール"
+readme = "README.md"
+authors = [
+    { name = "h-wata", email = "hirofumi01.watanabe@g.softbank.co.jp" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "faster-whisper>=1.0.0",
+    "sounddevice>=0.4.6",
+    "numpy>=1.24.0",
+    "anthropic>=0.18.0",
+    "claude-code-sdk>=0.0.1",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "anyio>=4.0.0",
+    "textual>=0.50.0",
+]
+
+[project.optional-dependencies]
+cuda = [
+    "nvidia-cudnn-cu12>=9.0.0",
+]
+
+[project.scripts]
+meeting-transcriber = "meeting_transcriber.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/meeting_transcriber"]
+
+[tool.yapf]
+based_on_style = "google"
+column_limit = 119
+
+[tool.ruff]
+line-length = 119
+
+[tool.ruff.lint]
+preview = true
+select = ["A", "ANN", "C4", "D", "D401", "E", "F", "N", "Q", "W", "SLF"]
+ignore = [
+    "ANN002",
+    "ANN003",
+    "ANN1",
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D105",
+    "D106",
+    "D107",
+    "D203",
+    "D212",
+    "D404",
+]
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "single"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-annotations]
+suppress-dummy-args = true
+
+[tool.ruff.format]
+quote-style = "single"
+line-ending = "lf"
