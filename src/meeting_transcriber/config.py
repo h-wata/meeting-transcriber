@@ -83,7 +83,7 @@ class Config:
     # 議事録更新設定
     auto_update: bool = False
     update_interval: int = 120
-    version_history: bool = False
+    version_history: bool = True
 
     def get_output_path(self) -> Path:
         """実際の出力先パスを取得."""

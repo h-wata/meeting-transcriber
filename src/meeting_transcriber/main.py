@@ -138,9 +138,11 @@ class MeetingTranscriber:
                 result = self.updater.update(transcripts_copy, full=full)
                 if result.success:
                     elapsed = datetime.now() - self.start_time
-                    print(f'\r議事録を更新しました'
-                          f' | 新規: {result.new_entries_count}件'
-                          f' | 経過: {str(elapsed).split(".")[0]}')
+                    print(
+                        f'\r議事録を更新しました'
+                        f' | 新規: {result.new_entries_count}件'
+                        f' | 経過: {str(elapsed).split(".")[0]}'
+                    )
                 else:
                     print(f'\r更新に失敗しました: {result.error}')
             finally:

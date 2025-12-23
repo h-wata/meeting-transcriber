@@ -19,10 +19,7 @@ class AnthropicAPIBackend(Backend):
         response = self.client.messages.create(
             model='claude-sonnet-4-20250514',
             max_tokens=8192,
-            messages=[{
-                'role': 'user',
-                'content': prompt
-            }],
+            messages=[{'role': 'user', 'content': prompt}],
         )
         return response.content[0].text
 

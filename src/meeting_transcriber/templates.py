@@ -11,8 +11,7 @@ from meeting_transcriber.config import TemplateInfo
 import yaml
 
 BUILTIN_TEMPLATES = {
-    'default':
-        """---
+    'default': """---
 name: "汎用議事録"
 description: "標準的な議事録フォーマット"
 tags:
@@ -56,8 +55,7 @@ tags:
 
 _この議事録はAIによって自動生成されました（{{update_count}}回更新）_
 """,
-    '1on1':
-        """---
+    '1on1': """---
 name: "1on1ミーティング"
 description: "1対1の定期ミーティング用"
 tags:
@@ -104,8 +102,7 @@ tags:
 
 _自動生成: {{datetime}}_
 """,
-    'brainstorm':
-        """---
+    'brainstorm': """---
 name: "ブレインストーミング"
 description: "アイデア出し・ブレスト用"
 tags:
@@ -149,8 +146,7 @@ tags:
 
 _自動生成: {{datetime}}_
 """,
-    'standup':
-        """---
+    'standup': """---
 name: "スタンドアップ"
 description: "朝会・デイリースタンドアップ用"
 tags:
@@ -187,8 +183,7 @@ tags:
 
 _自動生成: {{datetime}}_
 """,
-    'client':
-        """---
+    'client': """---
 name: "顧客打ち合わせ"
 description: "顧客・クライアントとの打ち合わせ用"
 tags:

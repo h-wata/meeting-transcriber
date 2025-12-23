@@ -17,11 +17,11 @@ class AudioRecorder:
     """音声入力を管理するクラス."""
 
     def __init__(
-            self,
-            device_id: int | None = None,
-            sample_rate: int = 16000,
-            step_duration: float = 5.0,  # ステップ間隔（秒）
-            window_duration: float = 15.0,  # ウィンドウ長（秒）
+        self,
+        device_id: int | None = None,
+        sample_rate: int = 16000,
+        step_duration: float = 5.0,  # ステップ間隔（秒）
+        window_duration: float = 15.0,  # ウィンドウ長（秒）
     ) -> None:
         self.device_id = device_id
         self.sample_rate = sample_rate
@@ -42,11 +42,11 @@ class AudioRecorder:
         self._on_chunk_callback: Callable[[np.ndarray], None] | None = None
 
     def _audio_callback(
-            self,
-            indata: np.ndarray,
-            frames: int,  # noqa: ARG002
-            time_info,  # noqa: ARG002, ANN001
-            status: sd.CallbackFlags,  # noqa: ARG002
+        self,
+        indata: np.ndarray,
+        frames: int,  # noqa: ARG002
+        time_info,  # noqa: ARG002, ANN001
+        status: sd.CallbackFlags,  # noqa: ARG002
     ) -> None:
         """音声入力コールバック."""
         if self._is_paused:
@@ -68,7 +68,7 @@ class AudioRecorder:
 
                 # ウィンドウ長を超えた場合は切り詰め
                 if len(chunk) > self.window_samples:
-                    chunk = chunk[-self.window_samples:]
+                    chunk = chunk[-self.window_samples :]
 
                 # 次回のために末尾を保持（window - step = 10秒分）
                 keep_samples = self.window_samples - self.step_samples
@@ -150,10 +150,12 @@ class AudioRecorder:
         input_devices = []
         for i, device in enumerate(devices):
             if device['max_input_channels'] > 0:
-                input_devices.append({
-                    'id': i,
-                    'name': device['name'],
-                    'channels': device['max_input_channels'],
-                    'sample_rate': device['default_samplerate'],
-                })
+                input_devices.append(
+                    {
+                        'id': i,
+                        'name': device['name'],
+                        'channels': device['max_input_channels'],
+                        'sample_rate': device['default_samplerate'],
+                    }
+                )
         return input_devices

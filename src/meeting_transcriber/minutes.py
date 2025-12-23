@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-import warnings
 
+from meeting_transcriber.chunking import CHUNK_THRESHOLD
+from meeting_transcriber.chunking import MapReduceGenerator
 from meeting_transcriber.config import TranscriptEntry
 from meeting_transcriber.config import UpdateResult
 from meeting_transcriber.templates import TemplateManager
@@ -14,9 +15,6 @@ from meeting_transcriber.templates import TemplateManager
 if TYPE_CHECKING:
     from meeting_transcriber.backends.base import Backend
     from meeting_transcriber.config import Template
-
-# 文字起こしの最大文字数（約100K tokens相当、それ以上は最新のものを優先）
-MAX_TRANSCRIPT_CHARS = 150000
 
 FULL_GENERATION_PROMPT = """あなたは議事録作成アシスタントです。
 以下の文字起こしテキストから、構造化された議事録を作成してください。
@@ -65,6 +63,14 @@ class MinutesGenerator:
     def __init__(self, backend: Backend, template_manager: TemplateManager) -> None:
         self.backend = backend
         self.template_manager = template_manager
+        self._map_reduce_generator: MapReduceGenerator | None = None
+
+    @property
+    def map_reduce_generator(self) -> MapReduceGenerator:
+        """Map-Reduceジェネレーターを遅延初期化."""
+        if self._map_reduce_generator is None:
+            self._map_reduce_generator = MapReduceGenerator(self.backend)
+        return self._map_reduce_generator
 
     def generate_full(
         self,
@@ -75,27 +81,15 @@ class MinutesGenerator:
         """文字起こし全体から議事録を生成する."""
         transcript_text = '\n'.join(str(t) for t in transcripts)
 
-        # 長すぎる場合は最新のエントリを優先して切り詰め
-        if len(transcript_text) > MAX_TRANSCRIPT_CHARS:
-            warnings.warn(
-                f'文字起こしが長すぎるため切り詰めます（{len(transcript_text)} -> {MAX_TRANSCRIPT_CHARS}文字）',
-                stacklevel=2,
-            )
-            # 最新のエントリから逆順に追加して制限内に収める
-            truncated_entries = []
-            total_len = 0
-            for entry in reversed(transcripts):
-                entry_str = str(entry)
-                if total_len + len(entry_str) + 1 > MAX_TRANSCRIPT_CHARS:
-                    break
-                truncated_entries.append(entry_str)
-                total_len += len(entry_str) + 1
-            transcript_text = '\n'.join(reversed(truncated_entries))
-
         # transcriptをコンテキストに追加してテンプレートをレンダリング
         render_context = {**context, 'transcript': transcript_text}
         rendered_template = self.template_manager.render(template, render_context)
 
+        # 長文の場合はMap-Reduce方式を使用
+        if len(transcript_text) > CHUNK_THRESHOLD:
+            return self.map_reduce_generator.generate(transcripts, rendered_template)
+
+        # 短い場合は従来方式
         prompt = FULL_GENERATION_PROMPT.format(
             template=rendered_template,
             transcript=transcript_text,
@@ -235,7 +229,7 @@ class MinutesUpdater:
         transcripts: list[TranscriptEntry],
     ) -> list[TranscriptEntry]:
         """前回更新以降の新しい文字起こしを取得する."""
-        return transcripts[self.last_update_index:]
+        return transcripts[self.last_update_index :]
 
     def save(self, transcripts: list[TranscriptEntry]) -> Path:
         """議事録と文字起こしを保存する."""

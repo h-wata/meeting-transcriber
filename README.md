@@ -17,6 +17,14 @@
 - マイク入力デバイス
 - Claude API Key または Claude Code CLI（Maxプラン）
 
+### Linux
+
+PortAudioライブラリが必要です：
+
+```bash
+sudo apt install libportaudio2 portaudio19-dev
+```
+
 ### GPU使用時（推奨）
 
 - NVIDIA GPU（CUDA対応）
