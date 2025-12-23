@@ -110,7 +110,7 @@ class AnthropicAPIBackend:
     def generate(self, prompt: str) -> str:
         response = self.client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=4096,
+            max_tokens=8192,
             messages=[{"role": "user", "content": prompt}]
         )
         return response.content[0].text
@@ -143,7 +143,7 @@ class ClaudeAgentBackend:
     """Claude Agent SDK + OAuthトークン（Maxプラン活用）"""
 
     def __init__(self):
-        self.options = ClaudeAgentOptions(max_tokens=4096)
+        self.options = ClaudeAgentOptions(max_tokens=8192)
 
     async def generate_async(self, prompt: str) -> str:
         result_parts = []
@@ -339,12 +339,41 @@ def get_backend(config: Config) -> Backend:
 - \[ ] 更新中も録音・文字起こしは継続（非同期処理）
 - \[ ] 更新完了時にターミナル通知
 
-### 3.5 設定機能
+### 3.5 長文対応（Map-Reduce方式）
+
+長い会議（約20000文字以上の文字起こし）では、Map-Reduce方式で議事録を生成する。
+
+#### 3.5.1 処理の流れ
+
+```
+文字起こし（長文）
+    ↓
+話題の区切りを検出（Claudeに分析させる）
+    ↓
+[チャンク1] [チャンク2] [チャンク3] ...
+    ↓ 各チャンクから要点抽出（Map）
+[要点1]    [要点2]    [要点3]
+    ↓ 統合して議事録生成（Reduce）
+   最終議事録
+```
+
+#### 3.5.2 閾値
+
+- `CHUNK_THRESHOLD = 20000` 文字を超えると自動的にMap-Reduce方式に切り替え
+- `BOUNDARY_DETECTION_MAX = 30000` 文字ごとに区切り検出を実行
+
+#### 3.5.3 利点
+
+- 長時間会議でもClaudeの出力が途中で切れない
+- 話題の区切りで分割するため、文脈が保たれる
+- 各チャンクの要点を抽出してから統合するため、品質が安定
+
+### 3.6 設定機能
 
 - \[ ] コマンドライン引数で設定可能
 - \[ ] 設定ファイル（`~/.config/meeting-transcriber/config.yaml`）対応
 - \[ ] Whisperモデルサイズ選択（tiny/small/medium/large）
-- \[ ] 出力ディレクトリ / Obsidian Vault 指定
+- \[ ] 出力ディレクトリ / シンプル出力モード
 - \[ ] 議事録テンプレートのカスタマイズ
 
 #### 3.5.1 設定ファイル例
@@ -364,8 +393,8 @@ language: ja
 backend: auto
 
 # 出力設定
-obsidian_vault: ~/Obsidian/MyVault
-obsidian_folder: meetings
+output_dir: ./output
+simple_output_dir: null  # 指定時はシンプル出力モード（単一ファイル）
 filename_format: "meeting_%Y%m%d_%H%M%S"
 open_after: true
 
@@ -380,14 +409,14 @@ chunk_duration: 5
 # 議事録設定
 auto_update: false
 update_interval: 120
-version_history: false
+version_history: true  # デフォルトで有効（更新ごとにバージョン保存）
 ```
 
 ※ コマンドライン引数は設定ファイルより優先
 
-### 3.6 テンプレート機能
+### 3.7 テンプレート機能
 
-#### 3.6.1 テンプレート保存場所
+#### 3.7.1 テンプレート保存場所
 
 ```
 ~/.config/meeting-transcriber/
@@ -401,7 +430,7 @@ version_history: false
     └── custom.md       # 自作テンプレート
 ```
 
-#### 3.6.2 テンプレート形式
+#### 3.7.2 テンプレート形式
 
 テンプレートはMarkdown + プレースホルダー形式:
 
@@ -455,7 +484,7 @@ tags:
 _自動生成: {{datetime}}_
 ```
 
-#### 3.6.3 プレースホルダー一覧
+#### 3.7.3 プレースホルダー一覧
 
 | プレースホルダー   | 説明           | 例                         |
 | ------------------ | -------------- | -------------------------- |
@@ -467,7 +496,7 @@ _自動生成: {{datetime}}_
 | `{{update_count}}` | 更新回数       | 3                          |
 | `{{transcript}}`   | 文字起こし全文 | （差分更新時は使用しない） |
 
-#### 3.6.4 ビルトインテンプレート
+#### 3.7.4 ビルトインテンプレート
 
 **default.md（汎用）**
 
@@ -494,20 +523,20 @@ _自動生成: {{datetime}}_
 - 顧客情報、要件、合意事項
 - フォーマルな形式
 
-#### 3.6.5 テンプレート使用例
+#### 3.7.5 テンプレート使用例
 
 ```bash
 # デフォルトテンプレート
-python meeting_transcriber.py
+meeting-transcriber
 
 # 1on1用テンプレート
-python meeting_transcriber.py -t 1on1
+meeting-transcriber -t 1on1
 
 # ブレスト用
-python meeting_transcriber.py --template brainstorm
+meeting-transcriber --template brainstorm
 
 # テンプレート一覧表示
-python meeting_transcriber.py --list-templates
+meeting-transcriber --list-templates
 
 # 出力例:
 # 利用可能なテンプレート:
@@ -536,11 +565,10 @@ faster-whisper>=1.0.0
 sounddevice>=0.4.6
 numpy>=1.24.0
 anthropic>=0.18.0        # API方式用
-claude-agent-sdk>=0.1.0  # Claude Agent SDK方式用（Maxプラン活用）
+claude-code-sdk>=0.0.1   # Claude Agent SDK方式用（Maxプラン活用）
 python-dotenv>=1.0.0
-readchar>=4.0.0          # 非ブロッキングキー入力用
+textual>=0.50.0          # TUIフレームワーク
 pyyaml>=6.0              # 設定ファイル用
-jinja2>=3.1.0            # テンプレートエンジン（オプション）
 anyio>=4.0.0             # 非同期処理用
 ```
 
@@ -563,7 +591,7 @@ CLAUDE_CODE_OAUTH_TOKEN=xxxxx  # claude setup-token で取得
 ### 5.1 コマンドライン引数
 
 ```bash
-python meeting_transcriber.py [OPTIONS]
+meeting-transcriber [OPTIONS]
 
 Options:
   --model, -m         Whisperモデルサイズ [tiny|small|medium|large-v3] (default: small)
@@ -582,9 +610,9 @@ Options:
   # 出力設定
   --output, -o        出力ディレクトリ (default: ./output)
   --filename, -f      出力ファイル名フォーマット (default: "meeting_%Y%m%d_%H%M%S")
-  --obsidian-vault    Obsidian Vaultのパス（指定時はVault直下に出力）
-  --obsidian-folder   Vault内のサブフォルダ (default: "meetings")
+  --simple-output     シンプル出力モード（単一ファイルを直接出力）
   --open-after        終了後にファイルを開く（xdg-open）
+  --no-tui            TUIを無効化してシンプルモードで実行
 
   # テンプレート設定
   --template, -t      使用するテンプレート名 (default: "default")
@@ -593,65 +621,60 @@ Options:
   # 議事録更新オプション
   --auto-update       自動更新モードを有効化（デフォルトは手動）
   --update-interval   自動更新の間隔（秒）(default: 120) ※--auto-update時のみ有効
-  --version-history   更新ごとにバージョン保存（上書きしない）
+  --version-history   更新ごとにバージョン保存（デフォルトで有効）
 
   --help, -h          ヘルプ表示
 ```
 
-### 5.2 キー操作（録音中）
+### 5.2 キー操作（TUIモード）
 
 | キー           | 動作                                     |
 | -------------- | ---------------------------------------- |
-| `u` / `Enter`  | 議事録を更新（差分反映）                 |
+| `u`            | 議事録を更新（差分反映）                 |
 | `f`            | 議事録を全体再生成（フル更新）           |
 | `s`            | 現在の文字起こしを保存（議事録更新なし） |
 | `p`            | 一時停止/再開                            |
-| `q` / `Ctrl+C` | 終了（最終議事録生成）                   |
+| `c`            | コマンド入力（Claudeに議事録修正を指示） |
+| `q`            | 終了（最終議事録生成）                   |
 | `?`            | ヘルプ表示                               |
 
 ### 5.3 使用例
 
 ```bash
-# 基本的な使用（バックエンド自動選択）
-python meeting_transcriber.py
+# 基本的な使用（TUIモード、バックエンド自動選択）
+meeting-transcriber
 
 # Claude Agent SDK を使用（Maxプラン + OAuthトークン）
-python meeting_transcriber.py --backend claude-agent
+meeting-transcriber --backend claude-agent
 
 # Claude Code CLI を使用（Maxプラン + subprocess、最も安定）
-python meeting_transcriber.py --backend claude-cli
+meeting-transcriber --backend claude-cli
 
 # API を使用（従量課金）
-python meeting_transcriber.py --backend api
+meeting-transcriber --backend api
 
-# Obsidian Vaultに直接出力
-python meeting_transcriber.py --obsidian-vault ~/Obsidian/MyVault
-
-# Obsidian Vaultの特定フォルダに出力
-python meeting_transcriber.py --obsidian-vault ~/Obsidian/MyVault --obsidian-folder "Work/議事録"
+# シンプル出力モード（単一ファイルを直接出力）
+meeting-transcriber --simple-output ~/Documents/meetings/
 
 # テンプレートを指定して起動
-python meeting_transcriber.py -t 1on1
-python meeting_transcriber.py --template brainstorm
-python meeting_transcriber.py -t client --obsidian-vault ~/Obsidian/MyVault
+meeting-transcriber -t 1on1
+meeting-transcriber --template brainstorm
+meeting-transcriber -t client --simple-output ~/Documents/meetings/
 
 # テンプレート一覧を表示
-python meeting_transcriber.py --list-templates
-
-# ファイル名をカスタマイズ
-python meeting_transcriber.py --obsidian-vault ~/Obsidian/MyVault --filename "MTG_%Y%m%d"
+meeting-transcriber --list-templates
 
 # 出力先を任意のフォルダに指定
-python meeting_transcriber.py -o ~/Documents/meetings
+meeting-transcriber -o ~/Documents/meetings
 
-# 終了後にエディタで開く
-python meeting_transcriber.py --obsidian-vault ~/Obsidian/MyVault --open-after
-
-# フル指定例（Maxプラン + 1on1テンプレート + Obsidian出力）
-python meeting_transcriber.py -b claude-cli -t 1on1 --obsidian-vault ~/Obsidian/MyVault
+# TUIを無効化してシンプルモードで実行
+meeting-transcriber --no-tui
 
 # モデルとデバイスを指定
-python meeting_transcriber.py -m medium -d 2
+meeting-transcriber -m medium -d 2
+
+# GPU使用
+meeting-transcriber --compute-device cuda
 ```
 
 ---
@@ -734,8 +757,7 @@ class Config:
     # 出力設定
     output_dir: Path = Path("./output")
     filename_format: str = "meeting_%Y%m%d_%H%M%S"
-    obsidian_vault: Path | None = None  # 指定時はVaultに出力
-    obsidian_folder: str = "meetings"   # Vault内のサブフォルダ
+    simple_output_dir: Path | None = None  # 指定時はシンプル出力モード
     open_after: bool = False
 
     # テンプレート設定
@@ -745,12 +767,12 @@ class Config:
     # 議事録更新設定
     auto_update: bool = False  # デフォルトは手動更新
     update_interval: int = 120  # 自動更新時の間隔（秒）
-    version_history: bool = False
+    version_history: bool = True  # デフォルトで有効
 
     def get_output_path(self) -> Path:
         """実際の出力先パスを取得"""
-        if self.obsidian_vault:
-            return self.obsidian_vault / self.obsidian_folder
+        if self.simple_output_dir:
+            return self.simple_output_dir
         return self.output_dir
 
     def get_template_path(self) -> Path:
@@ -846,8 +868,6 @@ aliases:
 _この議事録はAIによって自動生成されました（{{update_count}}回更新）_
 ```
 
-※ フロントマターは `--obsidian-vault` 指定時のみ出力（通常モードでは省略可）
-
 ### 7.2 出力ファイル構成
 
 **通常モード（`--output`指定時）:**
@@ -858,48 +878,22 @@ output/
 │   ├── minutes.md              # 最新の議事録（リアルタイム更新）
 │   ├── minutes_final.md        # 最終版議事録（会議終了時に生成）
 │   ├── transcript_raw.txt      # 生の文字起こしデータ
-│   ├── metadata.json           # メタ情報（開始時刻、モデル等）
-│   └── history/                # --version-history 有効時
+│   └── history/                # version_history有効時（デフォルト）
 │       ├── minutes_v001.md     # 1回目更新
 │       ├── minutes_v002.md     # 2回目更新
 │       └── ...
 ```
 
-**Obsidianモード（`--obsidian-vault`指定時）:**
+**シンプル出力モード（`--simple-output`指定時）:**
 
 ```
-~/Obsidian/MyVault/
-└── meetings/                   # --obsidian-folder で指定
-    ├── meeting_20241219_143052.md   # 議事録（単一ファイル）
-    ├── meeting_20241219_160030.md
-    └── ...
-
-# 関連ファイルは別フォルダに保存
-~/.local/share/meeting-transcriber/
-└── 20241219_143052/
-    ├── transcript_raw.txt
-    ├── metadata.json
-    └── history/
+~/Documents/meetings/
+├── meeting_20241219_143052.md   # 議事録（単一ファイル）
+├── meeting_20241219_160030.md
+└── ...
 ```
 
-**Obsidian用議事録のフロントマター:**
-
-```markdown
----
-date: 2024-12-19
-time: "14:30:52"
-duration: "01:23:45"
-tags:
-  - meeting
-  - auto-generated
----
-
-# 議事録 - 2024-12-19
-
-## 基本情報
-
-...
-```
+※ シンプル出力モードではセッションディレクトリを作成せず、議事録ファイルのみを出力
 
 ### 7.3 実行時の表示例
 
@@ -940,6 +934,58 @@ tags:
    - minutes.md (最終版)
    - minutes_final.md
    - transcript_raw.txt
+```
+
+### 7.4 TUIモード（デフォルト）
+
+Textualフレームワークを使用した3パネル構成のTUIインターフェース。
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Meeting Transcriber          Model: small | Device: cuda      │
+├─────────────────────────────────────────────────────────────────┤
+│ [ Log ]                                                         │
+│ 14:30:05 録音開始...                                            │
+│ 14:30:35 更新完了 | 新規: 4件                                   │
+├─────────────────────────────────────────────────────────────────┤
+│ [ Transcript ]                                                  │
+│ [14:30:05] 今日は新機能のリリースについて話し合いたいと思います │
+│ [14:30:12] まず、進捗状況を確認しましょう                       │
+│ [14:30:25] バックエンドの実装は完了しています                   │
+├─────────────────────────────────────────────────────────────────┤
+│ [ Minutes Preview ]                                             │
+│ # 議事録 - 2024-12-19                                           │
+│ ## 議題                                                         │
+│ - 新機能リリースについて                                        │
+├─────────────────────────────────────────────────────────────────┤
+│ [ Claude Command ]                                              │
+│ > 決定事項を箇条書きにして                                      │
+├─────────────────────────────────────────────────────────────────┤
+│ 録音中 | 経過: 0:05:30 | 発言: 15件 | 更新: 2回                  │
+├─────────────────────────────────────────────────────────────────┤
+│ u 差分更新  f フル更新  s 保存  p 一時停止  c コマンド  q 終了  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**パネル構成:**
+
+| パネル           | 説明                                           |
+| ---------------- | ---------------------------------------------- |
+| Log              | 操作ログ・ステータスメッセージ                 |
+| Transcript       | リアルタイム文字起こし                         |
+| Minutes Preview  | 現在の議事録プレビュー（Markdown）             |
+| Claude Command   | Claudeへの議事録修正指示を入力                 |
+| Status Bar       | 録音状態・経過時間・発言数・更新回数           |
+| Footer           | キーバインド一覧                               |
+
+**コマンド入力例:**
+
+`c`キーで入力欄にフォーカスし、Claudeに議事録修正の指示を送れます：
+
+```
+「アジェンダを議題に統一して」
+「決定事項を箇条書きにして」
+「参加者リストを追加して」
 ```
 
 ---
@@ -1017,9 +1063,11 @@ tags:
 - \[ ] `q`キーで正常終了し最終議事録が生成される
 - \[ ] ファイルが正しく保存される
 - \[ ] 更新中も録音が継続される
-- \[ ] `--obsidian-vault` 指定時にVaultに出力される
-- \[ ] Obsidian出力時にフロントマターが付与される
+- \[ ] `--simple-output` 指定時に単一ファイルで出力される
 - \[ ] 設定ファイルが正しく読み込まれる
+- \[ ] TUIモードで正常に動作する
+- \[ ] `--no-tui` でシンプルモードで動作する
+- \[ ] `c`キーでClaudeへの指示入力ができる
 - \[ ] `--list-templates` でテンプレート一覧が表示される
 - \[ ] `-t` オプションで指定したテンプレートが使用される
 - \[ ] テンプレートのプレースホルダーが正しく置換される
@@ -1033,27 +1081,30 @@ tags:
 
 ```bash
 # デバイス確認
-python meeting_transcriber.py --list-devices
+meeting-transcriber --list-devices
 
-# 基本テスト（手動で操作、バックエンド自動選択）
-python meeting_transcriber.py
+# 基本テスト（TUIモード、バックエンド自動選択）
+meeting-transcriber
 
 # バックエンド指定テスト
-python meeting_transcriber.py --backend api            # API方式
-python meeting_transcriber.py --backend claude-agent   # Claude Agent SDK方式
-python meeting_transcriber.py --backend claude-cli     # Claude Code CLI方式
+meeting-transcriber --backend api            # API方式
+meeting-transcriber --backend claude-agent   # Claude Agent SDK方式
+meeting-transcriber --backend claude-cli     # Claude Code CLI方式
 
-# Obsidian出力テスト
-python meeting_transcriber.py --obsidian-vault ~/Obsidian/TestVault
+# シンプル出力モードテスト
+meeting-transcriber --simple-output ~/Documents/meetings/
+
+# TUIなしでテスト
+meeting-transcriber --no-tui
 
 # 自動更新モードでテスト
-python meeting_transcriber.py --auto-update --update-interval 30
+meeting-transcriber --auto-update --update-interval 30
 
 # 設定ファイルの場所を確認
-python meeting_transcriber.py --show-config
+meeting-transcriber --show-config
 
-# フル機能テスト（Maxプラン + 1on1 + Obsidian）
-python meeting_transcriber.py -b claude-cli -t 1on1 --obsidian-vault ~/Obsidian/TestVault
+# フル機能テスト（Maxプラン + 1on1 + シンプル出力）
+meeting-transcriber -b claude-cli -t 1on1 --simple-output ~/Documents/meetings/
 ```
 
 ### 10.3 テストシナリオ
@@ -1072,13 +1123,12 @@ python meeting_transcriber.py -b claude-cli -t 1on1 --obsidian-vault ~/Obsidian/
 2. `u`キーで数回更新
 3. `f`キーでフル更新 → 全体が再構成されることを確認
 
-**シナリオ3: Obsidian出力**
+**シナリオ3: シンプル出力**
 
-1. `--obsidian-vault ~/Obsidian/TestVault` で起動
+1. `--simple-output ~/Documents/meetings/` で起動
 2. 発話して `u`キーで更新
 3. `q`キーで終了
-4. Obsidian Vaultに議事録が作成されることを確認
-5. フロントマターが正しく設定されていることを確認
+4. 指定フォルダに単一の議事録ファイルが作成されることを確認
 
 **シナリオ4: テンプレート切り替え**
 
