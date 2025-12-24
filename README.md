@@ -172,6 +172,38 @@ Whisper設定:
   --no-tui                                   シンプルモードで実行
 ```
 
+## 設定ファイル
+
+`~/.config/meeting-transcriber/config.yaml` で設定を保存できます。
+
+```yaml
+# Whisper設定
+model_size: small          # tiny, small, medium, large-v3
+language: ja
+compute_device: auto       # auto, cuda, cpu
+step_duration: 5.0         # ステップ間隔（秒）
+window_duration: 15.0      # ウィンドウ長（秒）
+# device_id: 0             # 音声入力デバイスID
+
+# LLMバックエンド
+backend: auto              # api, claude-agent, claude-cli, auto
+
+# 出力設定
+output_dir: ./output
+filename_format: meeting_%Y%m%d_%H%M%S
+# simple_output_dir: ~/Obsidian/meetings  # シンプルモード用
+
+# テンプレート
+template: default          # default, 1on1, brainstorm, standup, client
+
+# 議事録更新設定
+auto_update: true          # 自動更新を有効化
+update_interval: 120       # 自動更新間隔（秒）
+version_history: true      # 更新ごとにバージョン保存
+```
+
+テンプレートは `~/.config/meeting-transcriber/templates/` に配置されます。
+
 ## トラブルシューティング
 
 ### CUDAエラー

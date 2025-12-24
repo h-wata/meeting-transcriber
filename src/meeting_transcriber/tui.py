@@ -10,6 +10,7 @@ from textual.app import App
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
+from textual.containers import VerticalScroll
 from textual.widgets import Footer
 from textual.widgets import Header
 from textual.widgets import Input
@@ -30,7 +31,7 @@ class LogPanel(RichLog):
     DEFAULT_CSS = """
     LogPanel {
         height: 6;
-        border: solid green;
+        border: solid white;
         background: $surface;
     }
     """
@@ -42,7 +43,7 @@ class TranscriptPanel(RichLog):
     DEFAULT_CSS = """
     TranscriptPanel {
         height: 1fr;
-        border: solid cyan;
+        border: solid white;
         background: $surface;
     }
     """
@@ -53,10 +54,6 @@ class MinutesPanel(Static):
 
     DEFAULT_CSS = """
     MinutesPanel {
-        height: 2fr;
-        border: solid yellow;
-        background: $surface;
-        overflow-y: auto;
         padding: 1;
     }
     """
@@ -80,7 +77,7 @@ class CommandInput(Input):
 
     DEFAULT_CSS = """
     CommandInput {
-        border: solid magenta;
+        border: solid white;
         background: $surface;
     }
     """
@@ -96,6 +93,12 @@ class MeetingTranscriberApp(App):
 
     #main-container {
         height: 1fr;
+    }
+
+    #minutes-scroll {
+        height: 2fr;
+        border: solid white;
+        background: $surface;
     }
 
     .panel-title {
@@ -145,7 +148,8 @@ class MeetingTranscriberApp(App):
             yield Static('[ Transcript ]', classes='panel-title')
             yield TranscriptPanel(id='transcript-panel', highlight=True, markup=True, auto_scroll=True)
             yield Static('[ Minutes Preview ]', classes='panel-title')
-            yield MinutesPanel(id='minutes-panel')
+            with VerticalScroll(id='minutes-scroll'):
+                yield MinutesPanel(id='minutes-panel')
             yield Static('[ Claude Command ]', classes='panel-title')
             yield CommandInput(id='command-input', placeholder='議事録への指示を入力...')
         yield StatusBar(id='status-bar')
@@ -158,6 +162,8 @@ class MeetingTranscriberApp(App):
 
         self.log_message('[green]録音開始...[/green]')
         self.log_message(f'ステップ: {self.config.step_duration}秒 | ウィンドウ: {self.config.window_duration}秒')
+        if self.config.auto_update:
+            self.log_message(f'[cyan]自動更新: {self.config.update_interval}秒間隔[/cyan]')
         self.update_status('録音中')
 
         # 録音開始
@@ -165,6 +171,26 @@ class MeetingTranscriberApp(App):
 
         # 文字起こしワーカーを開始（スレッドで実行）
         self.run_worker(self.transcribe_worker, exclusive=True, thread=True)
+
+        # 自動更新タイマーを開始
+        if self.config.auto_update:
+            self.set_interval(self.config.update_interval, self._auto_update)
+
+    def _auto_update(self) -> None:
+        """自動更新を実行する."""
+        if self._updating or self.recorder.is_paused():
+            return
+
+        with self.lock:
+            transcript_count = len(self.transcripts)
+            new_count = transcript_count - self.updater.last_update_index
+
+        # 新しい発言がなければスキップ
+        if new_count == 0:
+            return
+
+        self.log_message(f'[dim]自動更新開始 (新規: {new_count}件)[/dim]')
+        self._do_update(full=False)
 
     def transcribe_worker(self) -> None:
         """文字起こしワーカー（スレッドプールで実行）."""
@@ -216,9 +242,8 @@ class MeetingTranscriberApp(App):
             transcript_count = len(self.transcripts)
 
         bar = self.query_one('#status-bar', StatusBar)
-        bar.update(
-            f'{status} | 経過: {elapsed_str} | 発言: {transcript_count}件 | 更新: {self.updater.update_count}回'
-        )
+        update_count = self.updater.update_count
+        bar.update(f'{status} | 経過: {elapsed_str} | 発言: {transcript_count}件 | 更新: {update_count}回')
 
     def update_minutes_preview(self) -> None:
         """議事録プレビューを更新する."""
@@ -266,9 +291,8 @@ class MeetingTranscriberApp(App):
         try:
             result = self.updater.update(transcripts, full=full)
             if result.success:
-                self.call_from_thread(
-                    self.log_message, f'[green]更新完了 | 新規: {result.new_entries_count}件[/green]'
-                )
+                count = result.new_entries_count
+                self.call_from_thread(self.log_message, f'[green]更新完了 | 新規: {count}件[/green]')
                 self.call_from_thread(self.update_minutes_preview)
             else:
                 self.call_from_thread(self.log_message, f'[red]更新失敗: {result.error}[/red]')
