@@ -8,6 +8,8 @@ from meeting_transcriber.backends.api import AnthropicAPIBackend
 from meeting_transcriber.backends.base import Backend
 from meeting_transcriber.backends.claude_agent import ClaudeAgentBackend
 from meeting_transcriber.backends.claude_cli import ClaudeCLIBackend
+from meeting_transcriber.backends.local_llm import LocalLLMBackend
+from meeting_transcriber.backends.local_llm import LocalLLMConfig
 from meeting_transcriber.config import Config
 
 
@@ -33,6 +35,16 @@ def get_backend(config: Config) -> Backend:
         print('Claude Code CLI を使用します（Maxプラン）')
         return ClaudeCLIBackend()
 
+    if config.backend == 'local-llm':
+        if not LocalLLMBackend.check_available():
+            raise RuntimeError(
+                'airllm がインストールされていません\n'
+                'pip install airllm でインストールしてください'
+            )
+        llm_config = LocalLLMConfig.from_dict(config.local_llm)
+        print(f'ローカルLLM を使用します: {llm_config.model_name}')
+        return LocalLLMBackend(llm_config)
+
     # auto: 利用可能なバックエンドを自動選択
     if ClaudeAgentBackend.check_available():
         print('Claude Agent SDK を使用します（Maxプラン）')
@@ -50,5 +62,6 @@ def get_backend(config: Config) -> Backend:
         '利用可能なバックエンドがありません。以下のいずれかを設定:\n'
         '1. CLAUDE_CODE_OAUTH_TOKEN (claude setup-token)\n'
         '2. Claude Code CLI インストール\n'
-        '3. ANTHROPIC_API_KEY'
+        '3. ANTHROPIC_API_KEY\n'
+        '4. backend: local-llm (pip install airllm)'
     )
