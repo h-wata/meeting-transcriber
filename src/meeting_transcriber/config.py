@@ -69,7 +69,8 @@ class Config:
 
     # LLMバックエンド設定
     backend: str = 'auto'
-    local_llm: dict = field(default_factory=dict)  # ローカルLLM設定
+    local_llm: dict = field(default_factory=dict)  # ローカルLLM設定（airllm）
+    ollama: dict = field(default_factory=dict)  # Ollama設定
 
     # 出力設定
     output_dir: Path = field(default_factory=lambda: Path('./output'))
@@ -139,6 +140,7 @@ class Config:
             'realtime_display': self.realtime_display,
             'backend': self.backend,
             'local_llm': self.local_llm,
+            'ollama': self.ollama,
             'output_dir': self.output_dir,
             'filename_format': self.filename_format,
             'simple_output_dir': self.simple_output_dir,

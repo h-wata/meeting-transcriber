@@ -10,6 +10,8 @@ from meeting_transcriber.backends.claude_agent import ClaudeAgentBackend
 from meeting_transcriber.backends.claude_cli import ClaudeCLIBackend
 from meeting_transcriber.backends.local_llm import LocalLLMBackend
 from meeting_transcriber.backends.local_llm import LocalLLMConfig
+from meeting_transcriber.backends.ollama import OllamaBackend
+from meeting_transcriber.backends.ollama import OllamaConfig
 from meeting_transcriber.config import Config
 
 
@@ -45,6 +47,16 @@ def get_backend(config: Config) -> Backend:
         print(f'ローカルLLM を使用します: {llm_config.model_name}')
         return LocalLLMBackend(llm_config)
 
+    if config.backend == 'ollama':
+        ollama_config = OllamaConfig.from_dict(config.ollama)
+        if not OllamaBackend.check_available(ollama_config.base_url):
+            raise RuntimeError(
+                f'Ollamaサーバーに接続できません ({ollama_config.base_url})\n'
+                'ollama serve でサーバーを起動してください'
+            )
+        print(f'Ollama を使用します: {ollama_config.model}')
+        return OllamaBackend(ollama_config)
+
     # auto: 利用可能なバックエンドを自動選択
     if ClaudeAgentBackend.check_available():
         print('Claude Agent SDK を使用します（Maxプラン）')
@@ -63,5 +75,6 @@ def get_backend(config: Config) -> Backend:
         '1. CLAUDE_CODE_OAUTH_TOKEN (claude setup-token)\n'
         '2. Claude Code CLI インストール\n'
         '3. ANTHROPIC_API_KEY\n'
-        '4. backend: local-llm (pip install airllm)'
+        '4. backend: local-llm (pip install airllm)\n'
+        '5. backend: ollama (ollama serve)'
     )
