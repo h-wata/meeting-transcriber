@@ -54,6 +54,28 @@ class UpdateResult:
 
 
 @dataclass
+class LocalLLMConfig:
+    """ローカルLLM設定."""
+
+    base_url: str = 'http://localhost:1234/v1'  # LM Studioデフォルト
+    model: str = ''  # 空の場合は自動検出
+    max_tokens: int = 8192
+    temperature: float = 0.3
+    system_prompt: str = ''  # 追加のシステムプロンプト
+
+    @classmethod
+    def from_dict(cls, data: dict) -> LocalLLMConfig:
+        """辞書からLocalLLMConfigを作成."""
+        return cls(
+            base_url=data.get('base_url', 'http://localhost:1234/v1'),
+            model=data.get('model', ''),
+            max_tokens=data.get('max_tokens', 8192),
+            temperature=data.get('temperature', 0.3),
+            system_prompt=data.get('system_prompt', ''),
+        )
+
+
+@dataclass
 class Config:
     """アプリケーション設定."""
 
@@ -68,7 +90,8 @@ class Config:
     realtime_display: bool = True
 
     # LLMバックエンド設定
-    backend: str = 'auto'
+    backend: str = 'auto'  # auto, api, claude-agent, claude-cli, local
+    local_llm: LocalLLMConfig = field(default_factory=LocalLLMConfig)
 
     # 出力設定
     output_dir: Path = field(default_factory=lambda: Path('./output'))
@@ -112,6 +135,10 @@ class Config:
         if 'templates_dir' in data:
             data['templates_dir'] = Path(data['templates_dir']).expanduser()
 
+        # ローカルLLM設定の変換
+        if 'local_llm' in data and isinstance(data['local_llm'], dict):
+            data['local_llm'] = LocalLLMConfig.from_dict(data['local_llm'])
+
         return cls(**data)
 
     @classmethod
@@ -137,6 +164,7 @@ class Config:
             'device_id': self.device_id,
             'realtime_display': self.realtime_display,
             'backend': self.backend,
+            'local_llm': self.local_llm,
             'output_dir': self.output_dir,
             'filename_format': self.filename_format,
             'simple_output_dir': self.simple_output_dir,

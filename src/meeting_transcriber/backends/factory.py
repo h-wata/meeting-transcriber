@@ -8,11 +8,18 @@ from meeting_transcriber.backends.api import AnthropicAPIBackend
 from meeting_transcriber.backends.base import Backend
 from meeting_transcriber.backends.claude_agent import ClaudeAgentBackend
 from meeting_transcriber.backends.claude_cli import ClaudeCLIBackend
+from meeting_transcriber.backends.openai_compat import OpenAICompatBackend
 from meeting_transcriber.config import Config
 
 
 def get_backend(config: Config) -> Backend:
     """設定に基づいてバックエンドを選択."""
+    if config.backend in ('local', 'local_llm'):
+        if not OpenAICompatBackend.check_available(config.local_llm.base_url):
+            raise RuntimeError(f'ローカルLLMサーバーに接続できません: {config.local_llm.base_url}')
+        print(f'ローカルLLM を使用します: {config.local_llm.base_url}')
+        return OpenAICompatBackend(config.local_llm)
+
     if config.backend == 'api':
         if not os.environ.get('ANTHROPIC_API_KEY'):
             raise RuntimeError('ANTHROPIC_API_KEY が設定されていません')
@@ -21,9 +28,8 @@ def get_backend(config: Config) -> Backend:
 
     if config.backend == 'claude-agent':
         if not ClaudeAgentBackend.check_available():
-            raise RuntimeError(
-                'CLAUDE_CODE_OAUTH_TOKEN が見つかりません\nclaude setup-token で OAuthトークンを取得してください'
-            )
+            msg = 'CLAUDE_CODE_OAUTH_TOKEN が見つかりません\nclaude setup-token で OAuthトークンを取得してください'
+            raise RuntimeError(msg)
         print('Claude Agent SDK を使用します（Maxプラン）')
         return ClaudeAgentBackend()
 
