@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from meeting_transcriber.config import Config
     from meeting_transcriber.minutes import MinutesUpdater
     from meeting_transcriber.transcriber import Transcriber
+    from meeting_transcriber.whiteboard_server import WhiteboardServer
 
 
 class LogPanel(RichLog):
@@ -111,6 +112,7 @@ class MeetingTranscriberApp(App):
     BINDINGS = [
         Binding('u', 'update_minutes', '差分更新'),
         Binding('f', 'full_update', 'フル更新'),
+        Binding('w', 'update_whiteboard', 'WB更新'),
         Binding('s', 'save', '保存'),
         Binding('p', 'pause', '一時停止/再開'),
         Binding('q', 'quit', '終了'),
@@ -126,6 +128,7 @@ class MeetingTranscriberApp(App):
         updater: 'MinutesUpdater',
         transcripts: list,
         lock: threading.Lock,
+        whiteboard_server: 'WhiteboardServer | None' = None,
     ) -> None:
         super().__init__()
         self.config = config
@@ -134,6 +137,7 @@ class MeetingTranscriberApp(App):
         self.updater = updater
         self.transcripts = transcripts
         self.lock = lock
+        self.whiteboard_server = whiteboard_server
         self.start_time = datetime.now()
         self.transcript_index = 0
         self._running = True
@@ -164,6 +168,10 @@ class MeetingTranscriberApp(App):
         self.log_message(f'ステップ: {self.config.step_duration}秒 | ウィンドウ: {self.config.window_duration}秒')
         if self.config.auto_update:
             self.log_message(f'[cyan]自動更新: {self.config.update_interval}秒間隔[/cyan]')
+        if self.whiteboard_server:
+            self.log_message(
+                f'[magenta]Whiteboard: http://localhost:{self.config.whiteboard_port}[/magenta]'
+            )
         self.update_status('録音中')
 
         # 録音開始
@@ -220,6 +228,10 @@ class MeetingTranscriberApp(App):
 
                 # UIを更新
                 self.call_from_thread(self.add_transcript, str(entry))
+
+                # ホワイトボードにも送信
+                if self.whiteboard_server:
+                    self.whiteboard_server.send_transcript(str(entry))
 
     def add_transcript(self, text: str) -> None:
         """文字起こしを追加する."""
@@ -294,11 +306,32 @@ class MeetingTranscriberApp(App):
                 count = result.new_entries_count
                 self.call_from_thread(self.log_message, f'[green]更新完了 | 新規: {count}件[/green]')
                 self.call_from_thread(self.update_minutes_preview)
+
+                # ホワイトボードも自動更新
+                if self.whiteboard_server:
+                    self.whiteboard_server.update_whiteboard(transcripts, full=full)
+                    self.call_from_thread(self.log_message, '[magenta]ホワイトボード更新中...[/magenta]')
             else:
                 self.call_from_thread(self.log_message, f'[red]更新失敗: {result.error}[/red]')
         finally:
             self._updating = False
             self.call_from_thread(self.update_status, '録音中')
+
+    def action_update_whiteboard(self) -> None:
+        """ホワイトボードを更新する."""
+        if not self.whiteboard_server:
+            self.log_message('[yellow]ホワイトボードが有効化されていません (--whiteboard)[/yellow]')
+            return
+
+        with self.lock:
+            transcripts_copy = list(self.transcripts)
+
+        if not transcripts_copy:
+            self.log_message('[yellow]まだ文字起こしがありません[/yellow]')
+            return
+
+        self.log_message('[magenta]ホワイトボードを更新中...[/magenta]')
+        self.whiteboard_server.update_whiteboard(transcripts_copy, full=True)
 
     def action_save(self) -> None:
         """文字起こしを保存する."""
@@ -331,7 +364,11 @@ class MeetingTranscriberApp(App):
         self.log_message('[dim]─[/dim]' * 30)
         self.log_message('[bold]操作方法:[/bold]')
         self.log_message('  [cyan]u[/cyan] 差分更新  [cyan]f[/cyan] フル更新  [cyan]s[/cyan] 保存')
-        self.log_message('  [cyan]p[/cyan] 一時停止  [cyan]c[/cyan] コマンド入力  [cyan]q[/cyan] 終了')
+        self.log_message('  [cyan]w[/cyan] WB更新  [cyan]p[/cyan] 一時停止  [cyan]c[/cyan] コマンド入力  [cyan]q[/cyan] 終了')
+        if self.whiteboard_server:
+            self.log_message(
+                f'  [magenta]Whiteboard: http://localhost:{self.config.whiteboard_port}[/magenta]'
+            )
         self.log_message('[dim]─[/dim]' * 30)
 
     def action_focus_command(self) -> None:

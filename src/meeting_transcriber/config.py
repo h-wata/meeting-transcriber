@@ -108,6 +108,10 @@ class Config:
     update_interval: int = 120
     version_history: bool = True
 
+    # ホワイトボード設定
+    whiteboard: bool = False
+    whiteboard_port: int = 8765
+
     def get_output_path(self) -> Path:
         """実際の出力先パスを取得."""
         if self.simple_output_dir:
@@ -174,6 +178,8 @@ class Config:
             'auto_update': self.auto_update,
             'update_interval': self.update_interval,
             'version_history': self.version_history,
+            'whiteboard': self.whiteboard,
+            'whiteboard_port': self.whiteboard_port,
         }
         for key, value in kwargs.items():
             if value is not None:

@@ -99,6 +99,9 @@ def show_config(config: Config) -> None:
     print(f'  自動更新: {config.auto_update}')
     if config.auto_update:
         print(f'  更新間隔: {config.update_interval}秒')
+    print(f'  ホワイトボード: {config.whiteboard}')
+    if config.whiteboard:
+        print(f'  WBポート: {config.whiteboard_port}')
     print()
 
 
@@ -211,6 +214,19 @@ def parse_args() -> argparse.Namespace:
         help='更新ごとにバージョン保存',
     )
 
+    # ホワイトボード設定
+    parser.add_argument(
+        '--whiteboard',
+        action='store_true',
+        help='コラボレーティブホワイトボードサーバーを起動',
+    )
+    parser.add_argument(
+        '--whiteboard-port',
+        type=int,
+        default=None,
+        help='ホワイトボードサーバーのポート (default: 8765)',
+    )
+
     # その他
     parser.add_argument(
         '--show-config',
@@ -281,6 +297,10 @@ def main() -> int:
         merge_kwargs['update_interval'] = args.update_interval
     if args.version_history:
         merge_kwargs['version_history'] = True
+    if args.whiteboard:
+        merge_kwargs['whiteboard'] = True
+    if args.whiteboard_port:
+        merge_kwargs['whiteboard_port'] = args.whiteboard_port
 
     config = config.merge_args(**merge_kwargs)
 

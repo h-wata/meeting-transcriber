@@ -70,8 +70,23 @@ class MeetingTranscriber:
             simple_mode=config.simple_output_dir is not None,
         )
 
+        # ホワイトボードサーバー
+        self.whiteboard_server = None
+        if config.whiteboard:
+            from meeting_transcriber.whiteboard_server import WhiteboardServer
+
+            self.whiteboard_server = WhiteboardServer(
+                backend=self.backend,
+                port=config.whiteboard_port,
+            )
+
     def run_tui(self) -> None:
         """TUIモードで実行する."""
+        # ホワイトボードサーバーを起動
+        if self.whiteboard_server:
+            self.whiteboard_server.start()
+            print(f'Whiteboard: http://localhost:{self.config.whiteboard_port}')
+
         from meeting_transcriber.tui import MeetingTranscriberApp
 
         app = MeetingTranscriberApp(
@@ -81,6 +96,7 @@ class MeetingTranscriber:
             updater=self.updater,
             transcripts=self.transcripts,
             lock=self._lock,
+            whiteboard_server=self.whiteboard_server,
         )
         result = app.run()
 
