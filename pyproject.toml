@@ -6,6 +6,7 @@ readme = "README.md"
 authors = [
     { name = "h-wata", email = "hirofumi01.watanabe@g.softbank.co.jp" }
 ]
+license = { text = "MIT" }
 requires-python = ">=3.10"
 dependencies = [
     "faster-whisper>=1.0.0",
@@ -21,6 +22,11 @@ dependencies = [
     "uvicorn[standard]>=0.27.0",
     "pydantic>=2.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/h-wata/meeting-transcriber"
+Repository = "https://github.com/h-wata/meeting-transcriber"
+Issues = "https://github.com/h-wata/meeting-transcriber/issues"
 
 [project.optional-dependencies]
 cuda = [

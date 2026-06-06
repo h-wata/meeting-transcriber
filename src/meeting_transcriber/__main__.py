@@ -87,8 +87,8 @@ def list_templates(templates_dir: Path) -> None:
 
 
 def init_config(force: bool = False) -> int:
-    """examples/config.yaml をユーザー設定ディレクトリへコピーする."""
-    import shutil
+    """パッケージ同梱の config テンプレートをユーザー設定ディレクトリへコピーする."""
+    from importlib import resources
 
     target = Config.get_default_config_path()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -98,19 +98,21 @@ def init_config(force: bool = False) -> int:
         print('上書きする場合は --force を指定してください', file=sys.stderr)
         return 1
 
-    # examples/config.yaml をパッケージから解決
-    candidates = [
-        Path(__file__).resolve().parent.parent.parent / 'examples' / 'config.yaml',  # 開発インストール
-        Path(__file__).resolve().parent / 'examples' / 'config.yaml',  # site-packages 同梱想定
-    ]
-    source = next((p for p in candidates if p.exists()), None)
-    if source is None:
-        print('examples/config.yaml が見つかりません（リポジトリ構造を確認してください）', file=sys.stderr)
+    # importlib.resources で同梱ファイルを取得（uv tool install 環境でも動く）
+    try:
+        template_text = (
+            resources.files('meeting_transcriber.data')
+            .joinpath('config_template.yaml')
+            .read_text(
+                encoding='utf-8',
+            )
+        )
+    except (FileNotFoundError, ModuleNotFoundError) as e:
+        print(f'設定テンプレートが見つかりません: {e}', file=sys.stderr)
         return 1
 
-    shutil.copy(source, target)
+    target.write_text(template_text, encoding='utf-8')
     print(f'設定ファイルを作成しました: {target}')
-    print(f'  雛形: {source}')
     print('編集してから meeting-transcriber を起動してください。')
     return 0
 
