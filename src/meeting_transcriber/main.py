@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from pathlib import Path
 import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
+from pathlib import Path
 
 from meeting_transcriber.audio import AudioRecorder
 from meeting_transcriber.backends import get_backend
-from meeting_transcriber.config import Config
-from meeting_transcriber.config import TranscriptEntry
-from meeting_transcriber.minutes import MinutesGenerator
-from meeting_transcriber.minutes import MinutesUpdater
+from meeting_transcriber.config import Config, TranscriptEntry
+from meeting_transcriber.minutes import MinutesGenerator, MinutesUpdater
 from meeting_transcriber.templates import TemplateManager
 from meeting_transcriber.transcriber import Transcriber
 
@@ -87,6 +85,23 @@ class MeetingTranscriber:
         # 終了後に出力先を表示
         if result is not None:
             print(f'\n出力: {result}')
+
+    def run_web(self, host: str = '127.0.0.1', port: int = 8765, open_browser: bool = True) -> None:
+        """Web UIモードで実行する."""
+        from meeting_transcriber.server import WebUIServer
+
+        server = WebUIServer(
+            config=self.config,
+            recorder=self.recorder,
+            transcriber=self.transcriber,
+            updater=self.updater,
+            transcripts=self.transcripts,
+            lock=self._lock,
+            host=host,
+            port=port,
+            open_browser=open_browser,
+        )
+        server.run()
 
     def _on_audio_chunk(self, _audio) -> None:  # noqa: ANN001
         """音声チャンクを受け取った時のコールバック."""

@@ -17,6 +17,9 @@ dependencies = [
     "pyyaml>=6.0",
     "anyio>=4.0.0",
     "textual>=0.50.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -69,6 +72,9 @@ convention = "google"
 
 [tool.ruff.lint.flake8-annotations]
 suppress-dummy-args = true
+
+[tool.ruff.lint.per-file-ignores]
+"src/meeting_transcriber/server.py" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "single"

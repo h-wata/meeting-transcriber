@@ -55,6 +55,7 @@ import argparse  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 from dotenv import load_dotenv  # noqa: E402
+
 from meeting_transcriber.audio import AudioRecorder  # noqa: E402
 from meeting_transcriber.config import Config  # noqa: E402
 from meeting_transcriber.main import MeetingTranscriber  # noqa: E402
@@ -222,6 +223,27 @@ def parse_args() -> argparse.Namespace:
         action='store_true',
         help='TUIを無効化してシンプルモードで実行',
     )
+    parser.add_argument(
+        '--web',
+        action='store_true',
+        help='Web UIモードで実行（ブラウザで議事録を表示）',
+    )
+    parser.add_argument(
+        '--web-host',
+        default='127.0.0.1',
+        help='Web UIのバインドホスト (default: 127.0.0.1)',
+    )
+    parser.add_argument(
+        '--web-port',
+        type=int,
+        default=8765,
+        help='Web UIのポート (default: 8765)',
+    )
+    parser.add_argument(
+        '--no-browser',
+        action='store_true',
+        help='Web UIモードでブラウザを自動起動しない',
+    )
 
     return parser.parse_args()
 
@@ -286,7 +308,13 @@ def main() -> int:
 
     try:
         transcriber = MeetingTranscriber(config)
-        if args.no_tui:
+        if args.web:
+            transcriber.run_web(
+                host=args.web_host,
+                port=args.web_port,
+                open_browser=not args.no_browser,
+            )
+        elif args.no_tui:
             transcriber.run()
         else:
             transcriber.run_tui()
