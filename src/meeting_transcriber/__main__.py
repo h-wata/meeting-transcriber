@@ -86,6 +86,35 @@ def list_templates(templates_dir: Path) -> None:
     print()
 
 
+def init_config(force: bool = False) -> int:
+    """examples/config.yaml をユーザー設定ディレクトリへコピーする."""
+    import shutil
+
+    target = Config.get_default_config_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if target.exists() and not force:
+        print(f'既に存在します: {target}', file=sys.stderr)
+        print('上書きする場合は --force を指定してください', file=sys.stderr)
+        return 1
+
+    # examples/config.yaml をパッケージから解決
+    candidates = [
+        Path(__file__).resolve().parent.parent.parent / 'examples' / 'config.yaml',  # 開発インストール
+        Path(__file__).resolve().parent / 'examples' / 'config.yaml',  # site-packages 同梱想定
+    ]
+    source = next((p for p in candidates if p.exists()), None)
+    if source is None:
+        print('examples/config.yaml が見つかりません（リポジトリ構造を確認してください）', file=sys.stderr)
+        return 1
+
+    shutil.copy(source, target)
+    print(f'設定ファイルを作成しました: {target}')
+    print(f'  雛形: {source}')
+    print('編集してから meeting-transcriber を起動してください。')
+    return 0
+
+
 def show_config(config: Config) -> None:
     """現在の設定を表示する."""
     print('現在の設定:')
@@ -237,6 +266,16 @@ def parse_args() -> argparse.Namespace:
         '--show-config',
         action='store_true',
         help='現在の設定を表示',
+    )
+    parser.add_argument(
+        '--init-config',
+        action='store_true',
+        help='examples/config.yaml をユーザー設定ディレクトリにコピーする',
+    )
+    parser.add_argument(
+        '--force',
+        action='store_true',
+        help='--init-config 時に既存のconfig.yamlを上書きする',
     )
     parser.add_argument(
         '--no-tui',
@@ -536,6 +575,10 @@ def main() -> int:
     if args.list_devices:
         list_devices()
         return 0
+
+    # 設定ファイル雛形生成
+    if args.init_config:
+        return init_config(force=args.force)
 
     # 設定を読み込み
     config = Config.load_default()

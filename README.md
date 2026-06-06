@@ -166,7 +166,16 @@ local_llm:
 
 ## 設定ファイル
 
-`~/.config/meeting-transcriber/config.yaml`（全項目オプション、未指定はデフォルト値）:
+雛形を自動生成:
+
+```bash
+meeting-transcriber --init-config              # ~/.config/meeting-transcriber/config.yaml を作成
+meeting-transcriber --init-config --force      # 既存があれば上書き
+```
+
+[`examples/config.yaml`](examples/config.yaml) に全項目を網羅したリファレンスがあります（Groq/OpenRouter/DeepSeek の cloud 設定例つき）。
+
+`~/.config/meeting-transcriber/config.yaml` の基本構造（全項目オプション、未指定はデフォルト値）:
 
 ```yaml
 model_size: small          # tiny / small / medium / large-v3

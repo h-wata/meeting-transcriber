@@ -1,0 +1,76 @@
+# Meeting Transcriber 設定ファイル（全項目リファレンス）
+#
+# このファイルを ~/.config/meeting-transcriber/config.yaml にコピーすると
+# 全項目をデフォルト値で動かせます。`meeting-transcriber --init-config` で自動コピー可能。
+#
+# 全項目オプションです。記載しない項目は dataclass のデフォルト値が使われます。
+
+# ─────────────────────────────────────────────
+# Whisper 設定
+# ─────────────────────────────────────────────
+model_size: small           # tiny / small / medium / large-v3
+language: ja                # 認識言語 (ja / en / auto など Whisper の言語コード)
+compute_device: auto        # auto / cuda / cpu
+step_duration: 5.0          # マイク入力時のステップ間隔（秒）
+window_duration: 15.0       # マイク入力時のウィンドウ長（秒）
+# device_id: 0              # 音声入力デバイスID（未指定でシステムデフォルト）
+realtime_display: true      # シンプル CLI モード時のリアルタイム文字表示
+
+# ─────────────────────────────────────────────
+# LLM バックエンド
+# ─────────────────────────────────────────────
+# auto / claude-cli / claude-agent / api / openai_compat
+# - auto は ローカルLLM → Claude Agent → Claude CLI → Anthropic API の順で自動選択
+# - cloud OpenAI 互換 (Groq等) は auto では選ばれないので明示指定が必要
+backend: auto
+
+# OpenAI 互換バックエンド設定（backend: openai_compat または auto でローカル LLM 使用時）
+local_llm:
+  # ── ローカル LM Studio の場合 ──
+  base_url: http://localhost:1234/v1
+  model: ""                 # 空ならロード済みモデルを自動検出
+
+  # ── Groq の場合（コメントを外して上の3行を置き換え） ──
+  # base_url: https://api.groq.com/openai/v1
+  # api_key_env: GROQ_API_KEY     # 必ず環境変数経由で渡す
+  # model: llama-3.3-70b-versatile
+
+  # ── OpenRouter の場合 ──
+  # base_url: https://openrouter.ai/api/v1
+  # api_key_env: OPENROUTER_API_KEY
+  # model: anthropic/claude-sonnet-4.6
+
+  # ── DeepSeek の場合 ──
+  # base_url: https://api.deepseek.com/v1
+  # api_key_env: DEEPSEEK_API_KEY
+  # model: deepseek-chat
+
+  max_tokens: 8192
+  temperature: 0.3
+  # system_prompt にバックエンド全体に効くシステム指示を入れられる
+  system_prompt: |
+    あなたは日本語の議事録作成の専門家です。
+    入力テキストは音声認識（STT）の結果のため、誤認識や言い淀みが含まれます。
+    文脈から適切に補正しつつ、簡潔かつ正確に要点をまとめてください。
+
+# ─────────────────────────────────────────────
+# 出力設定
+# ─────────────────────────────────────────────
+output_dir: ~/Documents/meetings        # 通常モードの出力先（セッションディレクトリ作成）
+filename_format: meeting_%Y%m%d_%H%M%S  # ディレクトリ名フォーマット (strftime)
+# simple_output_dir: ~/Obsidian/meetings  # シンプルモード時の単一ファイル出力先
+open_after: false           # 終了後に出力ファイルを開く (xdg-open / open)
+
+# ─────────────────────────────────────────────
+# テンプレート
+# ─────────────────────────────────────────────
+template: default           # default / 1on1 / brainstorm / standup / client / カスタム名
+# テンプレートは ~/.config/meeting-transcriber/templates/<name>.md で追加可能
+
+# ─────────────────────────────────────────────
+# 議事録更新設定
+# ─────────────────────────────────────────────
+auto_update: false          # 自動更新（true で update_interval ごとに差分更新）
+update_interval: 120        # 自動更新間隔（秒）
+version_history: true       # 更新ごとに minutes_vXXX.md を session_dir/history に保存
+transcript_only: false      # 文字起こしのみ（LLM 接続なし、議事録未生成）
