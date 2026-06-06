@@ -12,22 +12,55 @@
 
 ## インストール
 
+### `uv tool install`（推奨・PATHに通る）
+
 ```bash
-# uv（推奨）
+# GitHub から直接（最新版）
+uv tool install git+https://github.com/h-wata/meeting-transcriber.git
+
+# ローカルクローン済みの場合
+uv tool install /path/to/meeting-transcriber
+
+# 後で更新
+uv tool upgrade meeting-transcriber
+
+# アンインストール
+uv tool uninstall meeting-transcriber
+```
+
+`uv tool install` 後は `meeting-transcriber` コマンドが PATH に入ります（`~/.local/bin/`）。
+初回は `meeting-transcriber --init-config` で `~/.config/meeting-transcriber/config.yaml` を生成すると便利です。
+
+### 開発・編集する場合（`uv sync`）
+
+```bash
 git clone https://github.com/h-wata/meeting-transcriber.git
 cd meeting-transcriber
 uv sync                # CPU
 uv sync --extra cuda   # GPU
+uv run meeting-transcriber --web
+```
 
-# pip
+### pip
+
+```bash
 pip install meeting-transcriber          # CPU
 pip install meeting-transcriber[cuda]    # GPU
 ```
 
-Linux は別途 PortAudio が必要:
+### システム依存
+
+Linux は PortAudio が必要:
 
 ```bash
 sudo apt install libportaudio2 portaudio19-dev
+```
+
+音声/動画ファイル入力 (`--input`) を使う場合は `ffmpeg` も必要:
+
+```bash
+sudo apt install ffmpeg          # Ubuntu/Debian
+brew install ffmpeg              # macOS
 ```
 
 ## セットアップ
