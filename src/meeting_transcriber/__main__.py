@@ -151,7 +151,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '-b',
         '--backend',
-        choices=['api', 'claude-agent', 'claude-cli', 'auto'],
+        choices=['api', 'claude-agent', 'claude-cli', 'local', 'auto'],
         help='LLMバックエンド (default: auto)',
     )
 
@@ -217,6 +217,14 @@ def parse_args() -> argparse.Namespace:
         help='文字起こしのみ（議事録を生成しない）',
     )
 
+    # バッチ処理
+    parser.add_argument(
+        '--from-file',
+        type=Path,
+        default=None,
+        help='既存の文字起こしファイルから議事録を生成（globパターン可）',
+    )
+
     # その他
     parser.add_argument(
         '--show-config',
@@ -253,6 +261,102 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def parse_transcript_file(path: Path) -> list:
+    """transcript_raw.txtをTranscriptEntryリストにパースする."""
+    from meeting_transcriber.config import TranscriptEntry
+
+    entries = []
+    text = path.read_text(encoding='utf-8')
+    import re
+
+    # [HH:MM:SS] テキスト の形式をパース
+    pattern = re.compile(r'^\[(\d{2}:\d{2}:\d{2})\]\s*(.+)$', re.MULTILINE)
+    for i, match in enumerate(pattern.finditer(text)):
+        time_str, content = match.group(1), match.group(2)
+        from datetime import datetime
+
+        timestamp = datetime.strptime(time_str, '%H:%M:%S')
+        entries.append(TranscriptEntry(timestamp=timestamp, text=content, index=i))
+
+    # パターンにマッチしない場合はテキスト全体を1エントリとして扱う
+    if not entries:
+        from datetime import datetime
+
+        entries.append(TranscriptEntry(timestamp=datetime.now(), text=text.strip(), index=0))
+
+    return entries
+
+
+def run_batch(args: argparse.Namespace, config: Config) -> int:
+    """既存の文字起こしファイルから議事録をバッチ生成する."""
+    import glob as glob_module
+
+    from meeting_transcriber.backends.factory import get_backend
+    from meeting_transcriber.minutes import MinutesGenerator
+
+    # backendの上書き
+    if args.backend:
+        config = config.merge_args(backend=args.backend)
+    if args.template:
+        config = config.merge_args(template=args.template)
+
+    # globパターン展開
+    input_path = args.from_file.expanduser()
+    if '*' in str(input_path) or '?' in str(input_path):
+        files = sorted(Path(p) for p in glob_module.glob(str(input_path)))
+    elif input_path.is_dir():
+        files = sorted(input_path.glob('**/transcript_raw.txt'))
+    else:
+        files = [input_path]
+
+    if not files:
+        print(f'ファイルが見つかりません: {input_path}', file=sys.stderr)
+        return 1
+
+    print(f'{len(files)} 件のファイルを処理します')
+
+    # バックエンドとテンプレートの初期化
+    backend = get_backend(config)
+    template_manager = TemplateManager(config.templates_dir)
+    template_manager.install_builtin_templates()
+    template = template_manager.get_template(config.template)
+    generator = MinutesGenerator(backend, template_manager)
+
+    for i, file_path in enumerate(files, 1):
+        print(f'\n[{i}/{len(files)}] {file_path}')
+
+        # 既に議事録がある場合はスキップ
+        output_path = file_path.parent / 'minutes.md'
+        if output_path.exists():
+            print('  スキップ（議事録が既に存在します）')
+            continue
+
+        try:
+            entries = parse_transcript_file(file_path)
+            if not entries:
+                print('  スキップ（空のファイル）')
+                continue
+
+            print(f'  {len(entries)} 件のエントリを処理中...')
+            context = TemplateManager.get_default_context(
+                entries[0].timestamp,
+                entries[-1].timestamp,
+                1,
+            )
+            minutes = generator.generate_full(entries, template, context)
+
+            output_path.write_text(minutes, encoding='utf-8')
+            final_path = file_path.parent / 'minutes_final.md'
+            final_path.write_text(minutes, encoding='utf-8')
+            print(f'  完了 → {output_path}')
+
+        except Exception as e:
+            print(f'  エラー: {e}', file=sys.stderr)
+
+    print(f'\n全{len(files)}件の処理が完了しました')
+    return 0
+
+
 def main() -> int:
     """メイン関数."""
     # 環境変数を読み込み
@@ -277,6 +381,10 @@ def main() -> int:
     if args.show_config:
         show_config(config)
         return 0
+
+    # バッチ処理モード
+    if args.from_file:
+        return run_batch(args, config)
 
     # コマンドライン引数をマージ
     merge_kwargs = {}

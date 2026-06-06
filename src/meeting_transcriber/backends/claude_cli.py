@@ -41,7 +41,7 @@ class ClaudeCLIBackend(Backend):
         env = os.environ.copy()
         env.pop('ANTHROPIC_API_KEY', None)
 
-        cmd = ['claude', '-p', prompt, '--output-format', 'text']
+        cmd = ['claude', '-p', prompt, '--output-format', 'text', '--model', 'sonnet']
         if self.has_persistent_context:
             cmd += ['--session-id', self.session_id]
 

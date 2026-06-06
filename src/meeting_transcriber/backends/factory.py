@@ -43,7 +43,11 @@ def get_backend(config: Config, session_id: str | None = None) -> Backend:
         print('Claude Code CLI を使用します（Maxプラン）')
         return ClaudeCLIBackend(session_id=session_id)
 
-    # auto: 利用可能なバックエンドを自動選択
+    # auto: 利用可能なバックエンドを自動選択（ローカルLLM最優先）
+    if OpenAICompatBackend.check_available(config.local_llm.base_url):
+        print(f'ローカルLLM を使用します: {config.local_llm.base_url}')
+        return OpenAICompatBackend(config.local_llm)
+
     if ClaudeAgentBackend.check_available():
         print('Claude Agent SDK を使用します（Maxプラン）')
         return ClaudeAgentBackend()
@@ -58,7 +62,8 @@ def get_backend(config: Config, session_id: str | None = None) -> Backend:
 
     raise RuntimeError(
         '利用可能なバックエンドがありません。以下のいずれかを設定:\n'
-        '1. CLAUDE_CODE_OAUTH_TOKEN (claude setup-token)\n'
-        '2. Claude Code CLI インストール\n'
-        '3. ANTHROPIC_API_KEY'
+        '1. ローカルLLMサーバー (LM Studio等)\n'
+        '2. CLAUDE_CODE_OAUTH_TOKEN (claude setup-token)\n'
+        '3. Claude Code CLI インストール\n'
+        '4. ANTHROPIC_API_KEY'
     )

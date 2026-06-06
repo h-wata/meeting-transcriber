@@ -15,7 +15,10 @@
 
 - Python 3.10以上
 - マイク入力デバイス
-- Claude API Key または Claude Code CLI（Maxプラン）
+- LLMバックエンド（いずれか1つ）:
+  - ローカルLLM: LM Studio / Ollama / vLLM等（無料）
+  - Claude Code CLI（Maxプラン）
+  - Anthropic API Key（従量課金）
 
 ### Linux
 
@@ -135,6 +138,49 @@ meeting-transcriber -t standup
 meeting-transcriber -t client
 ```
 
+### ローカルLLMバックエンド（LM Studio等）
+
+OpenAI互換APIサーバー（LM Studio, Ollama, vLLM等）をバックエンドとして使用できます。
+
+```bash
+# LM Studioサーバーを起動してモデルをロード
+lms server start
+lms load google/gemma-4-e4b -y
+
+# ローカルLLMで起動
+meeting-transcriber --backend local
+```
+
+`auto`モードではローカルLLMサーバーが起動していれば最優先で使用されます。
+
+設定ファイルでの指定：
+
+```yaml
+backend: local  # または auto（サーバー起動時に自動選択）
+local_llm:
+  base_url: http://localhost:1234/v1
+  model: ""  # 空の場合はロード済みモデルを自動検出
+  max_tokens: 8192
+  temperature: 0.3
+```
+
+### バッチ処理（既存の文字起こしから議事録生成）
+
+`transcript_raw.txt` が既にある場合、バッチ処理で議事録を生成できます。
+
+```bash
+# 単一ファイル
+meeting-transcriber --from-file ~/Documents/v2t/meeting_20251219_172043/transcript_raw.txt --backend local
+
+# ディレクトリ指定（配下のtranscript_raw.txtを全て処理）
+meeting-transcriber --from-file ~/Documents/v2t/ --backend local
+
+# globパターン
+meeting-transcriber --from-file "~/Documents/v2t/meeting_202512*/transcript_raw.txt" --backend local
+```
+
+既に `minutes.md` が存在するディレクトリはスキップされます。
+
 ### シンプル出力モード
 
 セッションディレクトリを作成せず、単一のMarkdownファイルを直接出力します。
@@ -155,7 +201,11 @@ Whisper設定:
   --compute-device {auto,cuda,cpu}           計算デバイス（default: auto）
 
 バックエンド:
-  -b, --backend {api,claude-cli,auto}        LLMバックエンド（default: auto）
+  -b, --backend {api,claude-agent,claude-cli,local,auto}
+                                             LLMバックエンド（default: auto）
+
+バッチ処理:
+  --from-file PATH                           既存の文字起こしファイルから議事録を生成
 
 出力:
   -o, --output PATH                          出力ディレクトリ
