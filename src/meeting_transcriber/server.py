@@ -6,6 +6,7 @@ import asyncio
 import logging
 import signal
 import threading
+import uuid
 import webbrowser
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -41,7 +42,7 @@ button.primary:hover { background: #74c7ec; }
 button.danger { background: #f38ba8; color: #1e1e2e; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-main { display: grid; grid-template-columns: 1fr 1.5fr; gap: 8px; padding: 8px; overflow: hidden; }
+main { display: grid; grid-template-columns: 1fr 1.6fr 1.1fr; gap: 8px; padding: 8px; overflow: hidden; }
 .panel { background: #181825; border: 1px solid #313244; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden; }
 .panel-header { padding: 6px 12px; background: #11111b; border-bottom: 1px solid #313244; font-size: 12px; font-weight: 600; color: #94e2d5; display: flex; justify-content: space-between; }
 .panel-body { flex: 1; overflow-y: auto; padding: 12px; }
@@ -76,6 +77,19 @@ footer { padding: 8px 12px; background: #181825; border-top: 1px solid #313244; 
 #command-input { flex: 1; background: #313244; color: #cdd6f4; border: 1px solid #45475a; padding: 8px 12px; border-radius: 4px; font-size: 13px; }
 #command-input:focus { outline: none; border-color: #89b4fa; }
 
+#chat-panel { display: flex; flex-direction: column; }
+#chat-body { display: flex; flex-direction: column; gap: 8px; }
+.chat-entry { padding: 8px 10px; border-radius: 6px; font-size: 13px; line-height: 1.5; max-width: 95%; word-wrap: break-word; }
+.chat-entry.user { background: #313244; color: #cdd6f4; align-self: flex-end; }
+.chat-entry.assistant { background: #1e2030; border-left: 3px solid #89b4fa; color: #cdd6f4; align-self: flex-start; }
+.chat-entry.error { background: #2d1b2a; border-left: 3px solid #f38ba8; color: #f38ba8; }
+.chat-entry .role { font-size: 10px; color: #6c7086; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+.chat-entry .body { white-space: pre-wrap; }
+#chat-input-row { padding: 6px 8px; border-top: 1px solid #313244; display: flex; gap: 6px; background: #11111b; }
+#chat-input { flex: 1; background: #313244; color: #cdd6f4; border: 1px solid #45475a; padding: 6px 10px; border-radius: 4px; font-size: 13px; }
+#chat-input:focus { outline: none; border-color: #89b4fa; }
+#chat-typing { color: #6c7086; font-size: 11px; font-style: italic; padding: 4px 10px; }
+
 .empty { color: #6c7086; font-style: italic; text-align: center; padding: 20px; }
 .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #a6e3a1; margin-right: 6px; animation: pulse 2s infinite; }
 .pulse.paused { background: #f9e2af; animation: none; }
@@ -109,6 +123,14 @@ footer { padding: 8px 12px; background: #181825; border-top: 1px solid #313244; 
     <div class="panel" id="minutes-panel">
       <div class="panel-header"><span>議事録プレビュー</span><span id="update-count">更新: 0回</span></div>
       <div class="panel-body"><div id="minutes-content"><div class="empty">議事録はまだ生成されていません</div></div></div>
+    </div>
+    <div class="panel" id="chat-panel">
+      <div class="panel-header"><span>AIに聞く</span><span id="chat-typing-area"></span></div>
+      <div class="panel-body" id="chat-body"><div class="empty">会議内容について質問できます</div></div>
+      <div id="chat-input-row">
+        <input type="text" id="chat-input" placeholder="この議論どう思う？など (Enter送信)" autocomplete="off">
+        <button id="btn-chat-send" class="primary">送信</button>
+      </div>
     </div>
   </main>
   <footer>
@@ -197,6 +219,26 @@ function setStatus(s) {
   if (s.paused) pulse.classList.add('paused'); else pulse.classList.remove('paused');
 }
 
+const chatBody = document.getElementById('chat-body');
+const chatTypingArea = document.getElementById('chat-typing-area');
+let chatInitialized = false;
+
+function addChatEntry(entry) {
+  if (!chatInitialized) { chatBody.innerHTML = ''; chatInitialized = true; }
+  const div = document.createElement('div');
+  div.className = 'chat-entry ' + (entry.role || 'user');
+  const role = entry.role === 'assistant' ? 'AI' : (entry.role === 'error' ? 'エラー' : 'あなた');
+  div.innerHTML = '<div class="role">' + role + '</div><div class="body"></div>';
+  div.querySelector('.body').textContent = entry.message;
+  chatBody.appendChild(div);
+  chatBody.scrollTop = chatBody.scrollHeight;
+  chatTypingArea.textContent = '';
+}
+
+function setChatTyping(on) {
+  chatTypingArea.textContent = on ? '応答中...' : '';
+}
+
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -217,11 +259,16 @@ function connect() {
         msg.transcripts.forEach(addTranscript);
         updateMinutes(msg.minutes);
         setStatus(msg.status);
+        chatBody.innerHTML = '';
+        chatInitialized = (msg.chat_history || []).length > 0;
+        if (!chatInitialized) chatBody.innerHTML = '<div class="empty">会議内容について質問できます</div>';
+        (msg.chat_history || []).forEach(addChatEntry);
         break;
       case 'transcript': addTranscript(msg.text); break;
       case 'log': addLog(msg.message, msg.level); break;
       case 'minutes': updateMinutes(msg.markdown); break;
       case 'status': setStatus(msg.status); break;
+      case 'chat': addChatEntry(msg.entry); break;
     }
   };
 }
@@ -259,8 +306,28 @@ async function sendCommand() {
 document.getElementById('btn-send').onclick = sendCommand;
 cmdInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendCommand(); });
 
+const chatInput = document.getElementById('chat-input');
+async function sendChat() {
+  const text = chatInput.value.trim();
+  if (!text) return;
+  chatInput.value = '';
+  setChatTyping(true);
+  try {
+    await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: text}),
+    });
+  } catch (e) {
+    setChatTyping(false);
+    addChatEntry({role: 'error', message: e.message});
+  }
+}
+document.getElementById('btn-chat-send').onclick = sendChat;
+chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+
 document.addEventListener('keydown', (e) => {
-  if (e.target === cmdInput) return;
+  if (e.target === cmdInput || e.target === chatInput) return;
   if (e.key === 'u') action('update?full=false');
   else if (e.key === 'f') action('update?full=true');
   else if (e.key === 's') action('save');
@@ -275,6 +342,10 @@ document.addEventListener('keydown', (e) => {
 
 class _CommandBody(BaseModel):
     instruction: str
+
+
+class _ChatBody(BaseModel):
+    message: str
 
 
 class WebUIServer:
@@ -312,6 +383,13 @@ class WebUIServer:
         self._server: uvicorn.Server | None = None
         self._shutdown_event: threading.Event = threading.Event()
         self.output_path = None
+
+        # AIチャット用: 議事録生成とは別セッションでClaudeに会議内容を相談する
+        self._chat_backend = None
+        self._chat_session_id: str | None = None
+        self._chat_last_transcript_index = 0
+        self._chat_history: list[dict] = []
+        self._chat_in_progress = False
 
         self._allowed_origins = {
             f'http://{self.host}:{self.port}',
@@ -370,6 +448,11 @@ class WebUIServer:
             self._handle_command(body.instruction)
             return {'ok': True}
 
+        @app.post('/api/chat')
+        async def send_chat(body: _ChatBody) -> dict:
+            self._handle_chat(body.message)
+            return {'ok': True}
+
         @app.post('/api/quit')
         async def quit_app() -> dict:
             threading.Thread(target=self._shutdown, daemon=True).start()
@@ -395,6 +478,7 @@ class WebUIServer:
                         'transcripts': transcripts_snapshot,
                         'minutes': self.updater.get_current_minutes() if self.updater else '',
                         'status': self._build_status(),
+                        'chat_history': list(self._chat_history),
                     }
                 )
                 while True:
@@ -597,6 +681,76 @@ class WebUIServer:
             args=(instruction,),
             daemon=True,
         ).start()
+
+    def _handle_chat(self, message: str) -> None:
+        if self.config.transcript_only:
+            self._log('文字起こしのみモードのためAIチャットは無効です', 'warning')
+            return
+        message = message.strip()
+        if not message:
+            return
+        if self._chat_in_progress:
+            self._log('AIチャット応答中です', 'warning')
+            return
+        self._chat_in_progress = True
+        threading.Thread(target=self._chat_task, args=(message,), daemon=True).start()
+
+    def _ensure_chat_backend(self) -> None:
+        """チャット専用のBackendを遅延初期化する（議事録生成とは別セッション）."""
+        if self._chat_backend is not None:
+            return
+        from meeting_transcriber.backends import get_backend
+
+        self._chat_session_id = str(uuid.uuid4())
+        self._chat_backend = get_backend(self.config, session_id=self._chat_session_id)
+
+    def _build_chat_prompt(self, message: str, new_transcripts_text: str, is_first: bool) -> str:
+        """チャットプロンプトを構築する.
+
+        初回: 会議の役割説明 + 文字起こし全体 + 質問
+        2回目以降: 新規発言（あれば）+ 質問のみ。残りはClaudeのセッション履歴に任せる。
+        """
+        if is_first:
+            transcript_block = new_transcripts_text or '（まだ発言がありません）'
+            return (
+                'あなたは会議に同席しているAIアシスタントです。'
+                '以下の会議の文字起こしを踏まえて、ユーザーの質問や相談に簡潔に答えてください。'
+                '議事録の生成や修正は別系統で行われるので、ここでは議事録を出力する必要はありません。\n\n'
+                f'【会議の文字起こし】\n{transcript_block}\n\n'
+                f'【ユーザーからの質問】\n{message}'
+            )
+        if new_transcripts_text:
+            return f'【その後の新しい発言】\n{new_transcripts_text}\n\n【ユーザーからの質問】\n{message}'
+        return message
+
+    def _chat_task(self, message: str) -> None:
+        try:
+            self._ensure_chat_backend()
+
+            with self.lock:
+                transcripts_snapshot = list(self.transcripts)
+
+            is_first = self._chat_last_transcript_index == 0 and not self._chat_history
+            new_entries = transcripts_snapshot[self._chat_last_transcript_index :]
+            new_text = '\n'.join(str(t) for t in new_entries)
+            self._chat_last_transcript_index = len(transcripts_snapshot)
+
+            user_entry = {'role': 'user', 'message': message}
+            self._chat_history.append(user_entry)
+            self._broadcast({'type': 'chat', 'entry': user_entry})
+
+            prompt = self._build_chat_prompt(message, new_text, is_first)
+            response = self._chat_backend.generate(prompt)
+
+            assistant_entry = {'role': 'assistant', 'message': response}
+            self._chat_history.append(assistant_entry)
+            self._broadcast({'type': 'chat', 'entry': assistant_entry})
+        except Exception as e:  # noqa: BLE001
+            error_entry = {'role': 'error', 'message': f'エラー: {e}'}
+            self._chat_history.append(error_entry)
+            self._broadcast({'type': 'chat', 'entry': error_entry})
+        finally:
+            self._chat_in_progress = False
 
     def _command_task(self, instruction: str) -> None:
         prompt = f"""あなたは議事録修正アシスタントです。
