@@ -180,9 +180,13 @@ meeting-transcriber -t standup
 meeting-transcriber -t client
 ```
 
-### ローカルLLMバックエンド（LM Studio等）
+### OpenAI互換バックエンド（ローカル & cloud）
 
-OpenAI互換APIサーバー（LM Studio, Ollama, vLLM等）をバックエンドとして使用できます。
+`OpenAICompatBackend` は OpenAI 互換 API ならローカル・cloud 問わず使えます。
+
+> **Note**: `-b local` は旧名で deprecation 警告が出ます。新規は `-b openai_compat` を推奨。
+
+#### ローカル LLM（LM Studio / Ollama / vLLM）
 
 ```bash
 # LM Studioサーバーを起動してモデルをロード
@@ -190,21 +194,70 @@ lms server start
 lms load google/gemma-4-e4b -y
 
 # ローカルLLMで起動
-meeting-transcriber --backend local
+meeting-transcriber --backend openai_compat
 ```
 
-`auto`モードではローカルLLMサーバーが起動していれば最優先で使用されます。
+`auto`モードではローカル LLM サーバーが起動していれば最優先で使用されます
+（cloud OpenAI 互換は明示指定でのみ選ばれる安全設計）。
 
-設定ファイルでの指定：
+設定ファイル例：
 
 ```yaml
-backend: local  # または auto（サーバー起動時に自動選択）
+backend: openai_compat   # または auto
 local_llm:
   base_url: http://localhost:1234/v1
-  model: ""  # 空の場合はロード済みモデルを自動検出
+  model: ""              # 空の場合はロード済みモデルを自動検出
   max_tokens: 8192
   temperature: 0.3
 ```
+
+#### Groq（Llama 3.3 70B 等、500+ tok/s で爆速）
+
+```bash
+export GROQ_API_KEY="gsk_..."
+meeting-transcriber --backend openai_compat
+```
+
+```yaml
+backend: openai_compat
+local_llm:
+  base_url: https://api.groq.com/openai/v1
+  api_key_env: GROQ_API_KEY
+  model: llama-3.3-70b-versatile
+  max_tokens: 8192
+  temperature: 0.3
+```
+
+#### OpenRouter（多数モデルを1エンドポイントで切替）
+
+```bash
+export OPENROUTER_API_KEY="sk-or-..."
+```
+
+```yaml
+backend: openai_compat
+local_llm:
+  base_url: https://openrouter.ai/api/v1
+  api_key_env: OPENROUTER_API_KEY
+  model: anthropic/claude-sonnet-4.6   # or google/gemini-2.5-flash, etc.
+```
+
+#### DeepSeek
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+```
+
+```yaml
+backend: openai_compat
+local_llm:
+  base_url: https://api.deepseek.com/v1
+  api_key_env: DEEPSEEK_API_KEY
+  model: deepseek-chat
+```
+
+> **重要**: API key は必ず環境変数 (`api_key_env`) 経由で渡してください。
+> 設定ファイルの `api_key:` に直書きすると vault / dotfiles 経由で意図せず漏洩する恐れがあります。
 
 ### バッチ処理（既存の文字起こしから議事録生成）
 

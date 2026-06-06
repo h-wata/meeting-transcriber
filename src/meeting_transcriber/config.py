@@ -54,13 +54,35 @@ class UpdateResult:
 
 @dataclass
 class LocalLLMConfig:
-    """ローカルLLM設定."""
+    """OpenAI互換APIバックエンド設定（ローカル & cloud両対応）.
+
+    ローカル例: LM Studio / Ollama / vLLM (api_key 不要)
+    cloud例: Groq / OpenRouter / DeepSeek / Together AI (api_key_env で設定)
+    """
 
     base_url: str = 'http://localhost:1234/v1'  # LM Studioデフォルト
     model: str = ''  # 空の場合は自動検出
     max_tokens: int = 8192
     temperature: float = 0.3
     system_prompt: str = ''  # 追加のシステムプロンプト
+    api_key_env: str = ''  # API key を取得する環境変数名（例: 'GROQ_API_KEY'）
+    api_key: str = ''  # API key 直接指定（非推奨、api_key_env を優先）
+
+    def resolve_api_key(self) -> str | None:
+        """環境変数または直接指定から実際の API key を取得する."""
+        import os
+
+        if self.api_key_env:
+            value = os.environ.get(self.api_key_env)
+            if value:
+                return value
+        if self.api_key:
+            return self.api_key
+        return None
+
+    def is_cloud(self) -> bool:
+        """Cloud OpenAI 互換エンドポイントか（api_key 設定があれば cloud とみなす）."""
+        return bool(self.api_key_env or self.api_key)
 
     @classmethod
     def from_dict(cls, data: dict) -> LocalLLMConfig:
@@ -71,6 +93,8 @@ class LocalLLMConfig:
             max_tokens=data.get('max_tokens', 8192),
             temperature=data.get('temperature', 0.3),
             system_prompt=data.get('system_prompt', ''),
+            api_key_env=data.get('api_key_env', ''),
+            api_key=data.get('api_key', ''),
         )
 
 

@@ -151,8 +151,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '-b',
         '--backend',
-        choices=['api', 'claude-agent', 'claude-cli', 'local', 'auto'],
-        help='LLMバックエンド (default: auto)',
+        choices=['api', 'claude-agent', 'claude-cli', 'openai_compat', 'local', 'auto'],
+        help='LLMバックエンド (default: auto, local は openai_compat の旧名)',
     )
 
     # 出力設定
