@@ -30,3 +30,19 @@ class Backend(ABC):
 
         デフォルト実装は何もしない。
         """
+
+    @property
+    def last_cost_usd(self) -> float:
+        """直近の生成呼び出しのコスト（USD）.
+
+        サポートしないバックエンドは 0.0 を返す。
+        """
+        return 0.0
+
+    @property
+    def cumulative_cost_usd(self) -> float:
+        """セッション開始以降の累計コスト（USD）.
+
+        サポートしないバックエンドは 0.0 を返す。
+        """
+        return 0.0

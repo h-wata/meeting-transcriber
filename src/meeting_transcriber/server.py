@@ -213,7 +213,11 @@ function updateMinutes(markdown) {
 }
 
 function setStatus(s) {
-  statusEl.textContent = s.text || '';
+  let text = s.text || '';
+  if (typeof s.cumulative_cost_usd === 'number' && s.cumulative_cost_usd > 0) {
+    text += ' | コスト: $' + s.cumulative_cost_usd.toFixed(4);
+  }
+  statusEl.textContent = text;
   transcriptCount.textContent = (s.transcript_count || 0) + ' 件';
   updateCount.textContent = '更新: ' + (s.update_count || 0) + '回';
   if (s.paused) pulse.classList.add('paused'); else pulse.classList.remove('paused');
@@ -510,12 +514,29 @@ class WebUIServer:
             state = '更新中'
         else:
             state = '録音中'
+        cost = self._collect_cumulative_cost()
         return {
             'text': f'{state} | 経過: {elapsed_str} | 発言: {transcript_count}件',
             'transcript_count': transcript_count,
             'update_count': self.updater.update_count if self.updater else 0,
             'paused': self.recorder.is_paused(),
+            'cumulative_cost_usd': cost,
         }
+
+    def _collect_cumulative_cost(self) -> float:
+        """議事録生成とチャットの両バックエンドの累計コストを合算する."""
+        total = 0.0
+        backends = []
+        if self.updater is not None and self.updater.generator is not None:
+            backends.append(self.updater.generator.backend)
+        if self._chat_backend is not None:
+            backends.append(self._chat_backend)
+        for b in backends:
+            try:
+                total += float(b.cumulative_cost_usd)
+            except (AttributeError, TypeError, ValueError):
+                pass
+        return total
 
     def _broadcast(self, event: dict) -> None:
         """別スレッドからWebSocketクライアントへブロードキャスト."""
@@ -634,13 +655,27 @@ class WebUIServer:
         try:
             result = self.updater.update(transcripts, full=full)
             if result.success:
-                self._log(f'更新完了 | 新規: {result.new_entries_count}件', 'success')
+                cost_str = self._format_last_cost(self.updater.generator.backend if self.updater.generator else None)
+                self._log(f'更新完了 | 新規: {result.new_entries_count}件{cost_str}', 'success')
                 self._broadcast_minutes()
             else:
                 self._log(f'更新失敗: {result.error}', 'error')
         finally:
             self._updating = False
             self._broadcast_status()
+
+    @staticmethod
+    def _format_last_cost(backend: object | None) -> str:
+        """直近呼び出しコストをログ表示用の文字列にする（無効値は空文字）."""
+        if backend is None:
+            return ''
+        try:
+            cost = float(getattr(backend, 'last_cost_usd', 0.0))
+        except (TypeError, ValueError):
+            return ''
+        if cost <= 0:
+            return ''
+        return f' | コスト: ${cost:.4f}'
 
     def _handle_save(self) -> None:
         with self.lock:
