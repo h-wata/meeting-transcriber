@@ -14,7 +14,8 @@
 
 ### 1.3 解決策
 
-音声入力→文字起こし→議事録生成を一気通貫で行うPythonスクリプト
+音声入力 → 文字起こし → 議事録生成を一気通貫で行う Python ツール。
+ブラウザ UI で議事録プレビューと AI チャットを統合し、会議中に Claude と議論しながら進められる。
 
 ---
 
@@ -26,14 +27,21 @@
 │                                                                 │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐ │
 │  │ AudioInput  │───▶│ Transcriber │───▶│ MinutesGenerator    │ │
-│  │ (録音)      │    │ (Whisper)   │    │ (Claude API)        │ │
+│  │ (録音)      │    │ (Whisper)   │    │ (Backend)           │ │
 │  └─────────────┘    └─────────────┘    └─────────────────────┘ │
 │         │                  │                      │             │
 │         ▼                  ▼                      ▼             │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐ │
-│  │ マイク入力   │    │ リアルタイム │    │ Markdown議事録      │ │
-│  │ sounddevice │    │ 文字表示     │    │ ファイル出力        │ │
-│  └─────────────┘    └─────────────┘    └─────────────────────┘ │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │   UI 層: Web UI (FastAPI + WS) / TUI (Textual) / CLI    │   │
+│  │     ├─ 文字起こし / ログ / 議事録プレビュー              │   │
+│  │     └─ AIチャット（Web UIのみ、別 session_id）           │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                            │                                    │
+│                            ▼                                    │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │   Backend 層（差替可、session_id 対応）                 │   │
+│  │   claude-cli / claude-agent / api / openai_compat       │   │
+│  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -59,38 +67,36 @@
 
 ### 3.3 議事録生成機能
 
-- \[ ] 構造化されたMarkdown形式の出力
-- \[ ] ファイル自動保存
-- \[ ] **3つのバックエンド選択可能:**
+- \[x] 構造化された Markdown 形式の出力
+- \[x] ファイル自動保存
+- \[x] **5つのバックエンドから選択可能:**
 
 #### 3.3.1 バックエンド選択
 
-| バックエンド     | 課金        | 特徴                       |
-| ---------------- | ----------- | -------------------------- |
-| **api**          | 従量課金    | 安定、APIキー必要          |
-| **claude-agent** | Maxプラン内 | SDK使用、OAuthトークン必要 |
-| **claude-cli**   | Maxプラン内 | subprocess、最も安定       |
+| バックエンド          | 課金                                  | 特徴                                        |
+| --------------------- | ------------------------------------- | ------------------------------------------- |
+| **claude-cli**        | Max プラン枠（Agent SDK クレジット）  | `claude -p` subprocess、`--session-id` 対応 |
+| **claude-agent**      | Max プラン枠                          | SDK 経由、OAuth トークン必要                |
+| **api**               | 従量課金                              | Anthropic API 直接                          |
+| **openai_compat**     | ローカル無料 / cloud は API key 経由  | LM Studio / Ollama / Groq / OpenRouter 等   |
+| `local`（旧名）       | —                                     | `openai_compat` の deprecated エイリアス    |
 
 ```bash
-# API方式（従量課金）
-python meeting_transcriber.py --backend api
-
-# Claude Agent SDK方式（Maxプラン + OAuthトークン）
-python meeting_transcriber.py --backend claude-agent
-
-# Claude Code CLI方式（Maxプラン + subprocess）
-python meeting_transcriber.py --backend claude-cli
-
-# 自動選択（デフォルト）
-python meeting_transcriber.py --backend auto
+meeting-transcriber --backend claude-cli      # Claude Code CLI（推奨）
+meeting-transcriber --backend openai_compat   # ローカル LLM や Groq 等
+meeting-transcriber --backend auto            # 自動選択（デフォルト）
 ```
 
 **auto（デフォルト）の優先順位:**
 
-1. `CLAUDE_CODE_OAUTH_TOKEN` あり → `claude-agent`
-2. `claude` CLI が利用可能 → `claude-cli`
-3. `ANTHROPIC_API_KEY` あり → `api`
-4. どれもなし → エラー
+1. `openai_compat` でローカル LLM が応答 → `openai_compat` (ローカルのみ。cloud は明示指定が必要)
+2. `CLAUDE_CODE_OAUTH_TOKEN` あり → `claude-agent`
+3. `claude` CLI が利用可能 → `claude-cli`
+4. `ANTHROPIC_API_KEY` あり → `api`
+5. どれもなし → エラー
+
+cloud OpenAI 互換（Groq 等）は **明示指定 (`-b openai_compat` + `api_key_env`) のみ** で選ばれる。
+auto が勝手に課金経路へ倒さないための安全設計。詳細は ADR-0001 参照。
 
 #### 3.3.2 Anthropic API方式（従量課金）
 
@@ -215,54 +221,76 @@ class ClaudeCLIBackend:
             return False
 ```
 
-#### 3.3.5 バックエンド自動選択
+#### 3.3.5 OpenAI 互換バックエンド（ローカル & cloud）
+
+`OpenAICompatBackend` は OpenAI 互換 API ならローカル・cloud どちらにも繋がる。
+内部実装は同じで、`api_key_env` の有無で挙動が分岐:
+
+| 種別     | base_url 例                          | api_key | コスト                     |
+| -------- | ------------------------------------ | ------- | -------------------------- |
+| ローカル | `http://localhost:1234/v1`           | 不要    | 無料（GPU 必須）           |
+| Groq     | `https://api.groq.com/openai/v1`     | 必須    | 無料枠あり、500+ tok/s     |
+| OpenRouter | `https://openrouter.ai/api/v1`     | 必須    | モデルごとに従量課金       |
+| DeepSeek | `https://api.deepseek.com/v1`        | 必須    | 安価                       |
+
+cloud 接続時は環境変数 (`api_key_env`) 経由で API key を渡す。`Authorization: Bearer <key>` を自動でセット。
+
+#### 3.3.6 バックエンド共通 API
 
 ```python
-import os
+class Backend(ABC):
+    def generate(self, prompt: str) -> str: ...
+    @staticmethod
+    def check_available() -> bool: ...
 
-def get_backend(config: Config) -> Backend:
-    """設定に基づいてバックエンドを選択"""
+    @property
+    def has_persistent_context(self) -> bool: ...   # session 継続できるか
+    def reset_context(self) -> None: ...            # session 破損時の復旧
 
-    if config.backend == "api":
-        if not os.environ.get('ANTHROPIC_API_KEY'):
-            raise RuntimeError("ANTHROPIC_API_KEY が設定されていません")
-        print("✅ Anthropic API を使用します（従量課金）")
-        return AnthropicAPIBackend()
+    @property
+    def last_cost_usd(self) -> float: ...            # 直近呼び出しコスト
+    @property
+    def cumulative_cost_usd(self) -> float: ...      # 累計コスト
+```
 
-    elif config.backend == "claude-agent":
-        if not ClaudeAgentBackend.check_available():
-            raise RuntimeError(
-                "CLAUDE_CODE_OAUTH_TOKEN が見つかりません\n"
-                "claude setup-token で OAuthトークンを取得してください"
-            )
-        print("✅ Claude Agent SDK を使用します（Maxプラン）")
+`ClaudeCLIBackend` のみ `session_id` / コスト追跡を完全実装。他は基底クラスのデフォルト（False / 0.0）。
+
+#### 3.3.7 バックエンド自動選択
+
+```python
+def get_backend(config: Config, session_id: str | None = None) -> Backend:
+    """設定に基づいてバックエンドを選択。session_id は ClaudeCLI に渡される。"""
+
+    if config.backend in ('local', 'local_llm'):
+        warnings.warn(..., DeprecationWarning)
+        config.backend = 'openai_compat'
+
+    if config.backend == 'openai_compat':
+        if config.local_llm.is_cloud():
+            # cloud: api_key 必須
+            if not config.local_llm.resolve_api_key():
+                raise RuntimeError(f'API key 未設定: {config.local_llm.api_key_env}')
+        else:
+            # ローカル: 疎通確認
+            if not OpenAICompatBackend.check_available(config.local_llm.base_url):
+                raise RuntimeError('OpenAI 互換サーバーに接続できません')
+        return OpenAICompatBackend(config.local_llm)
+
+    if config.backend == 'claude-cli':
+        return ClaudeCLIBackend(session_id=session_id)
+    # ... claude-agent / api 省略 ...
+
+    # auto: cloud は明示指定でのみ → ローカル → claude-agent → claude-cli → api
+    if not config.local_llm.is_cloud():
+        if OpenAICompatBackend.check_available(config.local_llm.base_url):
+            return OpenAICompatBackend(config.local_llm)
+    if ClaudeAgentBackend.check_available():
         return ClaudeAgentBackend()
-
-    elif config.backend == "claude-cli":
-        if not ClaudeCLIBackend.check_available():
-            raise RuntimeError("Claude Code CLI が見つかりません")
-        print("✅ Claude Code CLI を使用します（Maxプラン）")
-        return ClaudeCLIBackend()
-
-    else:  # auto
-        if ClaudeAgentBackend.check_available():
-            print("✅ Claude Agent SDK を使用します（Maxプラン）")
-            return ClaudeAgentBackend()
-
-        if ClaudeCLIBackend.check_available():
-            print("✅ Claude Code CLI を使用します（Maxプラン）")
-            return ClaudeCLIBackend()
-
-        if os.environ.get('ANTHROPIC_API_KEY'):
-            print("✅ Anthropic API を使用します（従量課金）")
-            return AnthropicAPIBackend()
-
-        raise RuntimeError(
-            "利用可能なバックエンドがありません。以下のいずれかを設定:\n"
-            "1. CLAUDE_CODE_OAUTH_TOKEN (claude setup-token)\n"
-            "2. Claude Code CLI インストール\n"
-            "3. ANTHROPIC_API_KEY"
-        )
+    if ClaudeCLIBackend.check_available():
+        return ClaudeCLIBackend(session_id=session_id)
+    if os.environ.get('ANTHROPIC_API_KEY'):
+        return AnthropicAPIBackend()
+    raise RuntimeError('利用可能なバックエンドなし')
 ```
 
 ### 3.4 議事録更新機能（メイン機能）
@@ -547,6 +575,76 @@ meeting-transcriber --list-templates
 #   client      - 顧客打ち合わせ用
 ```
 
+### 3.8 Web UI モード
+
+`--web` 起動で FastAPI + WebSocket サーバーが立ち上がり、ブラウザに3カラムUIを表示。
+
+| カラム      | 内容                                                          |
+| ----------- | ------------------------------------------------------------- |
+| 左カラム    | 文字起こし（自動スクロール） + ログ                           |
+| 中央カラム  | 議事録プレビュー（Markdown レンダリング、自動更新）           |
+| 右カラム    | AIチャットパネル（後述 3.9）                                  |
+| ヘッダ      | ステータスバー（状態 / 経過時間 / 発言数 / 累計コスト USD）   |
+| フッタ      | 議事録への修正指示入力欄                                      |
+
+セキュリティ:
+- `Host` ヘッダ検証で DNS rebinding 攻撃を防止
+- `Origin` ヘッダ検証で CSRF を防止（GET/HEAD 以外の POST 系すべて）
+- WebSocket も accept 前に Origin/Host を検証
+
+`--web-host` / `--web-port` で接続先変更、`--no-browser` でブラウザ自動起動を抑止。
+
+### 3.9 AIチャットパネル（Web UI）
+
+会議中に Claude と議論できる対話インタフェース。**議事録生成とは別 session_id で動作**するため、
+チャットでの議論が議事録の構造に混入しない。
+
+- 初回送信時: 会議文字起こし全体 + 質問を1メッセージで送信（プロンプトキャッシュ起点）
+- 2回目以降: 前回送信以降の **差分発言** + 質問のみ（Claude セッションが履歴保持）
+- WebSocket でチャット履歴をブロードキャスト → 複数タブ・再接続で履歴復元
+- `--transcript-only` モードではチャットも無効
+
+### 3.10 セッション継続によるコンテキスト活用
+
+`ClaudeCLIBackend` が `--session-id <uuid>` 付きで `claude -p` を呼ぶ。会議1回 = 1セッション。
+
+- 起動時に UUID を `MeetingTranscriber.__init__` で1度だけ生成
+- `has_persistent_context` が True の間、議事録更新プロンプトは **新規発言のみ** を送る
+  簡素版 (`SESSION_INCREMENTAL_PROMPT`) を使用
+- セッション枯渇／破損のキーワード（`session` / `context` / `token` / `too long` / `limit`）を
+  stderr または `is_error: true` レスポンスから検出したら `_session_dead = True`
+- 失敗時 `reset_context()` で新規 UUID を生成し、従来パス（議事録全文 or 圧縮版）にフォールバック
+
+詳細は `docs/adr/0001-claude-cli-auth-and-billing.md` 参照。
+
+### 3.11 コスト可視化
+
+2026/6/15 の Claude Agent SDK クレジット分離（Max 5x: $100/月、Max 20x: $200/月）に対応。
+
+- `claude -p` を `--output-format json` で呼び、`total_cost_usd` を抽出
+- `Backend.last_cost_usd` / `cumulative_cost_usd` プロパティで参照
+- 議事録更新ログ・Web UI ステータスバーに累計 `$X.XXXX` を表示
+- AIチャット側 backend のコストも合算
+- JSON パース失敗時は生テキストフォールバック（後方互換）
+
+### 3.12 文字起こし専用モード
+
+`--transcript-only` で LLM バックエンドへの接続を完全にスキップ。
+
+- backend / generator を `None` に初期化
+- 議事録更新・AIチャット・Claude 指示送信を全てログ通知付きで no-op
+- 終了時は `save_transcript_only` で文字起こしのみ保存
+
+LLM 枠を節約したい場面、または後で `--from-file` でバッチ処理する想定で使用。
+
+### 3.13 バッチ処理
+
+`--from-file PATH` で既存 `transcript_raw.txt` から議事録のみを後追い生成。
+
+- 単一ファイル / ディレクトリ（再帰探索）/ glob パターンに対応
+- 各ファイルを `parse_transcript_file` でエントリ化 → `generate_full` 実行
+- 既に `minutes.md` がある対象はスキップ（冪等性）
+
 ---
 
 ## 4. 技術要件
@@ -593,50 +691,59 @@ CLAUDE_CODE_OAUTH_TOKEN=xxxxx  # claude setup-token で取得
 ```bash
 meeting-transcriber [OPTIONS]
 
-Options:
-  --model, -m         Whisperモデルサイズ [tiny|small|medium|large-v3] (default: small)
-  --language, -l      認識言語 (default: ja)
-  --device, -d        音声入力デバイスID (default: システムデフォルト)
-  --list-devices      利用可能な音声デバイス一覧を表示
-  --no-realtime       リアルタイム文字起こし表示を無効化
+# Whisper 設定
+  -m, --model {tiny|small|medium|large-v3}   モデルサイズ (default: small)
+  -l, --language LANG                        認識言語 (default: ja)
+  -d, --device ID                            音声入力デバイスID
+  --compute-device {auto|cuda|cpu}           実行デバイス
+  --list-devices                             マイク一覧表示
+  --no-realtime                              リアルタイム表示を無効化
 
-  # LLMバックエンド設定
-  --backend, -b       LLMバックエンド [api|claude-agent|claude-cli|auto] (default: auto)
-                      api: Anthropic API（従量課金）
-                      claude-agent: Claude Agent SDK + OAuthトークン（Maxプラン）
-                      claude-cli: Claude Code CLI subprocess（Maxプラン、最も安定）
-                      auto: 利用可能な方式を自動選択
+# LLM バックエンド
+  -b, --backend {api|claude-agent|claude-cli|openai_compat|local|auto}
+                                             LLM バックエンド (default: auto)
+                                             local は openai_compat の旧名（deprecated）
 
-  # 出力設定
-  --output, -o        出力ディレクトリ (default: ./output)
-  --filename, -f      出力ファイル名フォーマット (default: "meeting_%Y%m%d_%H%M%S")
-  --simple-output     シンプル出力モード（単一ファイルを直接出力）
-  --open-after        終了後にファイルを開く（xdg-open）
-  --no-tui            TUIを無効化してシンプルモードで実行
+# 出力
+  -o, --output PATH                          出力ディレクトリ
+  -f, --filename FORMAT                      ファイル名フォーマット
+  --simple-output PATH                       単一ファイル出力モード
+  --open-after                               終了後にファイルを開く
 
-  # テンプレート設定
-  --template, -t      使用するテンプレート名 (default: "default")
-  --list-templates    利用可能なテンプレート一覧を表示
+# テンプレート
+  -t, --template NAME                        テンプレート名
+  --list-templates                           テンプレート一覧
 
-  # 議事録更新オプション
-  --auto-update       自動更新モードを有効化（デフォルトは手動）
-  --update-interval   自動更新の間隔（秒）(default: 120) ※--auto-update時のみ有効
-  --version-history   更新ごとにバージョン保存（デフォルトで有効）
+# 動作モード
+  --auto-update                              自動更新を有効化
+  --update-interval SEC                      自動更新間隔（秒）
+  --version-history                          更新ごとにバージョン保存
+  --transcript-only                          文字起こしのみ（LLM 接続なし）
+  --from-file PATH                           既存文字起こしからバッチ生成
 
-  --help, -h          ヘルプ表示
+# UI
+  --no-tui                                   TUI 無効（シンプル CLI）
+  --web                                      Web UI モード
+  --web-host HOST                            Web UI バインドホスト (default: 127.0.0.1)
+  --web-port PORT                            Web UI ポート (default: 8765)
+  --no-browser                               Web UI でブラウザを自動起動しない
+
+# その他
+  --show-config                              現在の設定を表示
+  --help, -h                                 ヘルプ
 ```
 
-### 5.2 キー操作（TUIモード）
+### 5.2 キー操作（TUI / Web UI 共通）
 
-| キー           | 動作                                     |
-| -------------- | ---------------------------------------- |
-| `u`            | 議事録を更新（差分反映）                 |
-| `f`            | 議事録を全体再生成（フル更新）           |
-| `s`            | 現在の文字起こしを保存（議事録更新なし） |
-| `p`            | 一時停止/再開                            |
-| `c`            | コマンド入力（Claudeに議事録修正を指示） |
-| `q`            | 終了（最終議事録生成）                   |
-| `?`            | ヘルプ表示                               |
+| キー  | 動作                                       | TUI | Web UI |
+| ----- | ------------------------------------------ | --- | ------ |
+| `u`   | 議事録を差分更新                           | ✓   | ✓      |
+| `f`   | 議事録をフル更新（全体再生成）             | ✓   | ✓      |
+| `s`   | 文字起こしを保存                           | ✓   | ✓      |
+| `p`   | 一時停止/再開                              | ✓   | ✓      |
+| `c`   | コマンド入力（Claudeに議事録修正を指示）    | ✓   | —      |
+| `q`   | 終了                                       | ✓   | ✓      |
+| `?`   | ヘルプ                                     | ✓   | —      |
 
 ### 5.3 使用例
 

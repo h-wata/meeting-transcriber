@@ -1,431 +1,181 @@
 # Meeting Transcriber
 
-リアルタイム議事録生成ツール。音声をWhisperで文字起こしし、Claudeで議事録を自動生成します。
+リアルタイム議事録生成ツール。faster-whisper で文字起こし、Claude などの LLM で議事録化。
 
 ## 特徴
 
-- リアルタイム音声認識（faster-whisper）
-- 複数LLMバックエンド対応（Claude Code CLI / Anthropic API / Claude Agent SDK / ローカルLLM）
-- 2種類のUI（ブラウザ向け **Web UI** ／ ターミナル向け **TUI**）
-- 会議中に Claude に相談できる **AIチャットパネル**（Web UI）
-- セッション継続で会議の文脈を Claude に蓄積（プロンプトキャッシュ最適化）
-- 差分更新／圧縮更新／Map-Reduce による効率的な議事録更新
-- 複数のテンプレート対応（デフォルト、1on1、ブレスト、スタンドアップ、クライアント）
-- 既存文字起こしからのバッチ処理（`--from-file`）
-- 文字起こし専用モード（`--transcript-only`、LLM接続なし）
-- シンプル出力モード（単一ファイル出力）
+- ブラウザ UI（推奨）／ ターミナル TUI ／ シンプル CLI の3モード
+- Web UI に **AIチャットパネル**: 会議中に「この議論どう思う？」を Claude に相談
+- LLM バックエンド: Claude Code CLI / Anthropic API / OpenAI互換（Groq・OpenRouter・LM Studio等）
+- セッション継続・圧縮更新・Map-Reduce による効率的な議事録生成
+- バッチ処理（`--from-file`）、文字起こし専用（`--transcript-only`）
 
-## 必要要件
+## インストール
 
-- Python 3.10以上
-- マイク入力デバイス
-- LLMバックエンド（いずれか1つ）:
-  - ローカルLLM: LM Studio / Ollama / vLLM等（無料）
-  - Claude Code CLI（Maxプラン）
-  - Anthropic API Key（従量課金）
+```bash
+# uv（推奨）
+git clone https://github.com/h-wata/meeting-transcriber.git
+cd meeting-transcriber
+uv sync                # CPU
+uv sync --extra cuda   # GPU
 
-### Linux
+# pip
+pip install meeting-transcriber          # CPU
+pip install meeting-transcriber[cuda]    # GPU
+```
 
-PortAudioライブラリが必要です：
+Linux は別途 PortAudio が必要:
 
 ```bash
 sudo apt install libportaudio2 portaudio19-dev
 ```
 
-### GPU使用時（推奨）
-
-- NVIDIA GPU（CUDA対応）
-- CUDA 12.x
-- cuDNN 9.x（自動インストール）
-
-## インストール
-
-### uvを使用（推奨）
-
-```bash
-git clone https://github.com/h-wata/meeting-transcriber.git
-cd meeting-transcriber
-uv sync
-```
-
-**GPU (CUDA) を使用する場合：**
-
-```bash
-uv sync --extra cuda
-```
-
-### pipを使用
-
-```bash
-pip install meeting-transcriber
-
-# GPU (CUDA) を使用する場合
-pip install meeting-transcriber[cuda]
-```
-
 ## セットアップ
 
-### Claude認証（いずれか1つ）
-
-**方法1: Claude Code CLI（Maxプラン向け・推奨）**
+LLM バックエンドのいずれか1つを用意:
 
 ```bash
-# Claude Code CLIをインストール
-npm install -g @anthropic-ai/claude-code
+# Claude Code CLI（Max プラン推奨）
+npm install -g @anthropic-ai/claude-code && claude auth login
 
-# 認証
-claude auth login
-```
-
-**方法2: Anthropic API Key**
-
-```bash
+# Anthropic API
 export ANTHROPIC_API_KEY="sk-ant-..."
-```
 
-### 音声デバイスの確認
+# Groq（爆速・無料枠あり）
+export GROQ_API_KEY="gsk_..."
 
-```bash
-meeting-transcriber --list-devices
+# ローカル LLM（LM Studio / Ollama / vLLM）は起動してあれば auto で検出
 ```
 
 ## 使い方
 
-### 基本的な使用方法
+```bash
+meeting-transcriber --web                 # Web UI（推奨）
+meeting-transcriber                       # TUI
+meeting-transcriber --no-tui              # シンプル CLI
+
+meeting-transcriber --list-devices        # マイク一覧
+meeting-transcriber -m medium             # Whisper モデル変更
+meeting-transcriber --compute-device cuda # GPU 使用
+meeting-transcriber -t 1on1               # テンプレート (default/1on1/brainstorm/standup/client)
+```
+
+### Web UI
+
+`--web` で `http://127.0.0.1:8765` がブラウザで開きます。3カラム構成（文字起こし+ログ ／ 議事録プレビュー ／ AIチャット）。
+
+`-w, --web-host`, `--web-port`, `--no-browser` で挙動を調整可能。
+
+### キー操作（TUI / Web UI 共通）
+
+| キー | 機能 |
+| --- | --- |
+| `u` / `f` | 差分更新 / フル更新 |
+| `s` | 保存 |
+| `p` | 一時停止/再開 |
+| `q` | 終了 |
+| `c` | コマンド入力（TUI のみ、Claude に修正指示） |
+
+### バッチ処理
+
+`transcript_raw.txt` から議事録だけ後で生成:
 
 ```bash
-# TUIモードで起動（デフォルト）
-meeting-transcriber
-
-# Web UIモードで起動（ブラウザが自動で開く）
-meeting-transcriber --web
-
-# 出力先を指定
-meeting-transcriber -o ~/Documents/meetings/
-
-# モデルサイズを指定（tiny/small/medium/large-v3）
-meeting-transcriber -m medium
-
-# GPU使用
-meeting-transcriber --compute-device cuda
+meeting-transcriber --from-file <path>                # 単一 / ディレクトリ / glob
 ```
 
-### Web UIモード（推奨）
+既に `minutes.md` があるディレクトリはスキップされます。
+
+### 文字起こし専用
 
 ```bash
-meeting-transcriber --web
+meeting-transcriber --transcript-only    # LLM 接続なし
 ```
 
-`http://127.0.0.1:8765` がブラウザで自動的に開きます。3 カラム構成：
-
-- **文字起こし** + **ログ**（左カラム）: リアルタイム表示
-- **議事録プレビュー**（中央）: Markdown レンダリング、自動更新
-- **AIに聞く**（右カラム）: 会議中にClaudeに相談できるチャットパネル
-
-#### AIチャットパネル
-
-「この2人の意見、噛み合ってる？」「この議論の論点を整理して」といった
-質問を、その時点の文字起こしを文脈として Claude が答えます。
-議事録生成とは別セッションで動くため、議事録の構造には影響しません。
+### シンプル出力
 
 ```bash
-# Web UI起動時のオプション
-meeting-transcriber --web                          # デフォルト（127.0.0.1:8765）
-meeting-transcriber --web --web-port 8080          # ポート変更
-meeting-transcriber --web --no-browser             # ブラウザ自動起動なし
+meeting-transcriber --simple-output ~/Documents/meetings/    # 単一ファイル出力
 ```
 
-#### キーボードショートカット（Web UI）
+## LLM バックエンド
 
-| キー | 機能       |
-| ---- | ---------- |
-| `u`  | 差分更新   |
-| `f`  | フル更新   |
-| `s`  | 保存       |
-| `p`  | 一時停止/再開 |
-| `q`  | 終了       |
+`-b` または config の `backend` で指定。`auto` は ローカルLLM → Claude Agent → Claude CLI → API の順で自動選択（cloud OpenAI 互換は明示指定のみ、課金経路に勝手に倒さない）。
 
-### TUI操作
+| backend | 用途 | 必要環境 |
+| --- | --- | --- |
+| `claude-cli` | Claude Code CLI（Max プラン枠） | `claude` コマンド + ログイン済み |
+| `claude-agent` | Claude Agent SDK | `CLAUDE_CODE_OAUTH_TOKEN` |
+| `api` | Anthropic API（従量課金） | `ANTHROPIC_API_KEY` |
+| `openai_compat` | OpenAI 互換（ローカル & cloud） | エンドポイント / API key |
+| `auto` | 上記から自動選択 | — |
 
-| キー | 機能                           |
-| ---- | ------------------------------ |
-| `u`  | 差分更新（新しい発言のみ反映） |
-| `f`  | フル更新（全体を再生成）       |
-| `s`  | 文字起こしを保存               |
-| `p`  | 一時停止/再開                  |
-| `c`  | コマンド入力（Claudeに指示）   |
-| `?`  | ヘルプ表示                     |
-| `q`  | 終了                           |
+### OpenAI 互換の設定例
 
-### コマンド入力例
-
-`c`キーで入力欄にフォーカスし、Claudeに議事録修正の指示を送れます：
-
-```
-「アジェンダを議題に統一して」
-「決定事項を箇条書きにして」
-「参加者リストを追加して」
-```
-
-### テンプレート
-
-```bash
-# 利用可能なテンプレート一覧
-meeting-transcriber --list-templates
-
-# テンプレートを指定
-meeting-transcriber -t 1on1
-meeting-transcriber -t brainstorm
-meeting-transcriber -t standup
-meeting-transcriber -t client
-```
-
-### OpenAI互換バックエンド（ローカル & cloud）
-
-`OpenAICompatBackend` は OpenAI 互換 API ならローカル・cloud 問わず使えます。
-
-> **Note**: `-b local` は旧名で deprecation 警告が出ます。新規は `-b openai_compat` を推奨。
-
-#### ローカル LLM（LM Studio / Ollama / vLLM）
-
-```bash
-# LM Studioサーバーを起動してモデルをロード
-lms server start
-lms load google/gemma-4-e4b -y
-
-# ローカルLLMで起動
-meeting-transcriber --backend openai_compat
-```
-
-`auto`モードではローカル LLM サーバーが起動していれば最優先で使用されます
-（cloud OpenAI 互換は明示指定でのみ選ばれる安全設計）。
-
-設定ファイル例：
+`~/.config/meeting-transcriber/config.yaml` の `local_llm` セクションで切替:
 
 ```yaml
-backend: openai_compat   # または auto
+backend: openai_compat
 local_llm:
+  # ローカル LM Studio
   base_url: http://localhost:1234/v1
-  model: ""              # 空の場合はロード済みモデルを自動検出
+  model: ""                                # 空ならロード済みモデルを自動検出
+
+  # Groq の場合
+  # base_url: https://api.groq.com/openai/v1
+  # api_key_env: GROQ_API_KEY
+  # model: llama-3.3-70b-versatile
+
+  # OpenRouter の場合
+  # base_url: https://openrouter.ai/api/v1
+  # api_key_env: OPENROUTER_API_KEY
+  # model: anthropic/claude-sonnet-4.6
+
+  # DeepSeek の場合
+  # base_url: https://api.deepseek.com/v1
+  # api_key_env: DEEPSEEK_API_KEY
+  # model: deepseek-chat
+
   max_tokens: 8192
   temperature: 0.3
 ```
 
-#### Groq（Llama 3.3 70B 等、500+ tok/s で爆速）
-
-```bash
-export GROQ_API_KEY="gsk_..."
-meeting-transcriber --backend openai_compat
-```
-
-```yaml
-backend: openai_compat
-local_llm:
-  base_url: https://api.groq.com/openai/v1
-  api_key_env: GROQ_API_KEY
-  model: llama-3.3-70b-versatile
-  max_tokens: 8192
-  temperature: 0.3
-```
-
-#### OpenRouter（多数モデルを1エンドポイントで切替）
-
-```bash
-export OPENROUTER_API_KEY="sk-or-..."
-```
-
-```yaml
-backend: openai_compat
-local_llm:
-  base_url: https://openrouter.ai/api/v1
-  api_key_env: OPENROUTER_API_KEY
-  model: anthropic/claude-sonnet-4.6   # or google/gemini-2.5-flash, etc.
-```
-
-#### DeepSeek
-
-```bash
-export DEEPSEEK_API_KEY="sk-..."
-```
-
-```yaml
-backend: openai_compat
-local_llm:
-  base_url: https://api.deepseek.com/v1
-  api_key_env: DEEPSEEK_API_KEY
-  model: deepseek-chat
-```
-
-> **重要**: API key は必ず環境変数 (`api_key_env`) 経由で渡してください。
-> 設定ファイルの `api_key:` に直書きすると vault / dotfiles 経由で意図せず漏洩する恐れがあります。
-
-### バッチ処理（既存の文字起こしから議事録生成）
-
-`transcript_raw.txt` が既にある場合、バッチ処理で議事録を生成できます。
-
-```bash
-# 単一ファイル
-meeting-transcriber --from-file ~/Documents/v2t/meeting_20251219_172043/transcript_raw.txt --backend local
-
-# ディレクトリ指定（配下のtranscript_raw.txtを全て処理）
-meeting-transcriber --from-file ~/Documents/v2t/ --backend local
-
-# globパターン
-meeting-transcriber --from-file "~/Documents/v2t/meeting_202512*/transcript_raw.txt" --backend local
-```
-
-既に `minutes.md` が存在するディレクトリはスキップされます。
-
-### シンプル出力モード
-
-セッションディレクトリを作成せず、単一のMarkdownファイルを直接出力します。
-
-```bash
-meeting-transcriber --simple-output ~/Documents/meetings/
-```
-
-### 文字起こし専用モード
-
-LLMバックエンドに接続せず、文字起こしだけ実行します。後でバッチ処理で議事録を生成する想定や、
-LLM枠を消費したくない場面に便利です。
-
-```bash
-meeting-transcriber --transcript-only
-```
-
-### セッション継続によるコンテキスト活用
-
-Claude Code CLIバックエンド使用時、会議1回 = 1セッション ID として `--session-id` 付きで
-`claude -p` を呼び出します。これにより：
-
-- プロンプトキャッシュが効いてコスト・速度が改善
-- Claude側に会議の流れが蓄積され、議事録品質が向上
-- AIチャットも別セッションで会議文脈を保持
-
-ユーザーが意識する設定は不要で、起動時に自動でUUIDが生成されます。
-詳細は [docs/adr/0001-claude-cli-auth-and-billing.md](docs/adr/0001-claude-cli-auth-and-billing.md) を参照。
-
-## コマンドラインオプション
-
-```
-使用方法: meeting-transcriber [OPTIONS]
-
-Whisper設定:
-  -m, --model {tiny,small,medium,large-v3}  モデルサイズ（default: small）
-  -l, --language LANG                        認識言語（default: ja）
-  -d, --device ID                            音声入力デバイスID
-  --compute-device {auto,cuda,cpu}           計算デバイス（default: auto）
-
-バックエンド:
-  -b, --backend {api,claude-agent,claude-cli,local,auto}
-                                             LLMバックエンド（default: auto）
-
-バッチ処理:
-  --from-file PATH                           既存の文字起こしファイルから議事録を生成
-
-出力:
-  -o, --output PATH                          出力ディレクトリ
-  -f, --filename FORMAT                      ファイル名フォーマット
-  --simple-output PATH                       シンプル出力モード（単一ファイル出力）
-  --open-after                               終了後にファイルを開く
-
-テンプレート:
-  -t, --template NAME                        テンプレート名
-
-更新設定:
-  --auto-update                              自動更新モードを有効化
-  --update-interval SEC                      自動更新間隔（秒）
-  --version-history                          更新ごとにバージョン保存
-  --transcript-only                          文字起こしのみ（議事録を生成しない）
-
-UI:
-  --no-tui                                   シンプルモードで実行（TUI無効）
-  --web                                      Web UIモードで実行
-  --web-host HOST                            Web UIのバインドホスト（default: 127.0.0.1）
-  --web-port PORT                            Web UIのポート（default: 8765）
-  --no-browser                               Web UIモードでブラウザを自動起動しない
-
-その他:
-  --list-devices                             音声デバイス一覧
-  --list-templates                           テンプレート一覧
-  --show-config                              現在の設定を表示
-```
+> API key は必ず環境変数 (`api_key_env`) 経由で渡してください。設定ファイルへの直書きは漏洩リスクがあります。
 
 ## 設定ファイル
 
-`~/.config/meeting-transcriber/config.yaml` で設定を保存できます。
+`~/.config/meeting-transcriber/config.yaml`（全項目オプション、未指定はデフォルト値）:
 
 ```yaml
-# Whisper設定
-model_size: small          # tiny, small, medium, large-v3
+model_size: small          # tiny / small / medium / large-v3
 language: ja
-compute_device: auto       # auto, cuda, cpu
-step_duration: 5.0         # ステップ間隔（秒）
-window_duration: 15.0      # ウィンドウ長（秒）
-# device_id: 0             # 音声入力デバイスID
-
-# LLMバックエンド
-backend: auto              # api, claude-agent, claude-cli, auto
-
-# 出力設定
+compute_device: auto       # auto / cuda / cpu
+backend: auto              # auto / claude-cli / claude-agent / api / openai_compat
 output_dir: ./output
-filename_format: meeting_%Y%m%d_%H%M%S
-# simple_output_dir: ~/Obsidian/meetings  # シンプルモード用
-
-# テンプレート
-template: default          # default, 1on1, brainstorm, standup, client
-
-# 議事録更新設定
-auto_update: true          # 自動更新を有効化
-update_interval: 120       # 自動更新間隔（秒）
-version_history: true      # 更新ごとにバージョン保存
-transcript_only: false     # 文字起こしのみ（議事録を生成しない）
+template: default          # default / 1on1 / brainstorm / standup / client
+auto_update: true
+update_interval: 120
+version_history: true
+transcript_only: false
 ```
 
-テンプレートは `~/.config/meeting-transcriber/templates/` に配置されます。
+テンプレートは `~/.config/meeting-transcriber/templates/` に追加可能。全 CLI オプションは `meeting-transcriber --help` を参照。
+
+## 補足
+
+- **セッション継続**: Claude Code CLI 使用時、会議1回 = 1セッション ID で `--session-id` 付き呼び出し → プロンプトキャッシュ有効化。設定不要。詳細は [docs/adr/0001-claude-cli-auth-and-billing.md](docs/adr/0001-claude-cli-auth-and-billing.md)
+- **コスト可視化**: `claude -p --output-format json` から `total_cost_usd` を取得し、Web UI ステータスバーに累計表示
 
 ## トラブルシューティング
 
-### CUDAエラー
+| 症状 | 対処 |
+| --- | --- |
+| `Unable to load libcudnn_ops.so.9` | `uv sync --reinstall` で依存再構築 |
+| マイクが認識されない | `--list-devices` で ID 確認 → `-d <ID>` で指定 |
+| 認識精度が低い | `-m medium` または `-m large-v3 --compute-device cuda` |
 
-```
-Unable to load libcudnn_ops.so.9
-```
+## ライセンス・謝辞
 
-→ cuDNNは自動インストールされますが、問題がある場合：
+MIT License.
 
-```bash
-# 依存関係を再インストール
-uv sync --reinstall
-```
-
-### マイクが認識されない
-
-```bash
-# デバイス一覧を確認
-meeting-transcriber --list-devices
-
-# デバイスIDを指定
-meeting-transcriber -d 2
-```
-
-### Whisperの認識精度が悪い
-
-```bash
-# より大きなモデルを使用
-meeting-transcriber -m medium  # または large-v3
-
-# GPU使用で高速化
-meeting-transcriber -m large-v3 --compute-device cuda
-```
-
-## ライセンス
-
-MIT License
-
-## 謝辞
-
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) - 高速なWhisper実装
-- [Textual](https://github.com/Textualize/textual) - TUIフレームワーク
-- [FastAPI](https://fastapi.tiangolo.com/) - Web UIサーバー
-- [Anthropic Claude](https://www.anthropic.com/) - 議事録生成AI
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper) / [Textual](https://github.com/Textualize/textual) / [FastAPI](https://fastapi.tiangolo.com/) / [Anthropic Claude](https://www.anthropic.com/)
