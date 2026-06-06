@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -38,8 +39,11 @@ class MeetingTranscriber:
         if not self.template:
             raise RuntimeError(f'テンプレートが見つかりません: {config.template}')
 
+        # 会議1回 = 1セッション: Claude側に会議の文脈を蓄積し、プロンプトキャッシュを有効化する
+        self.session_id = str(uuid.uuid4())
+
         # バックエンドの初期化
-        self.backend = get_backend(config)
+        self.backend = get_backend(config, session_id=self.session_id)
 
         # 各コンポーネントの初期化
         self.recorder = AudioRecorder(

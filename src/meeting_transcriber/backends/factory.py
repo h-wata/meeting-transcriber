@@ -12,8 +12,12 @@ from meeting_transcriber.backends.openai_compat import OpenAICompatBackend
 from meeting_transcriber.config import Config
 
 
-def get_backend(config: Config) -> Backend:
-    """設定に基づいてバックエンドを選択."""
+def get_backend(config: Config, session_id: str | None = None) -> Backend:
+    """設定に基づいてバックエンドを選択.
+
+    session_id を渡すと ClaudeCLIBackend がセッション継続モードで動作する。
+    他のバックエンドは無視。
+    """
     if config.backend in ('local', 'local_llm'):
         if not OpenAICompatBackend.check_available(config.local_llm.base_url):
             raise RuntimeError(f'ローカルLLMサーバーに接続できません: {config.local_llm.base_url}')
@@ -37,7 +41,7 @@ def get_backend(config: Config) -> Backend:
         if not ClaudeCLIBackend.check_available():
             raise RuntimeError('Claude Code CLI が見つかりません')
         print('Claude Code CLI を使用します（Maxプラン）')
-        return ClaudeCLIBackend()
+        return ClaudeCLIBackend(session_id=session_id)
 
     # auto: 利用可能なバックエンドを自動選択
     if ClaudeAgentBackend.check_available():
@@ -46,7 +50,7 @@ def get_backend(config: Config) -> Backend:
 
     if ClaudeCLIBackend.check_available():
         print('Claude Code CLI を使用します（Maxプラン）')
-        return ClaudeCLIBackend()
+        return ClaudeCLIBackend(session_id=session_id)
 
     if os.environ.get('ANTHROPIC_API_KEY'):
         print('Anthropic API を使用します（従量課金）')

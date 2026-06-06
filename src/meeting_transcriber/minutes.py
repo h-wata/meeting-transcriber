@@ -6,10 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from meeting_transcriber.chunking import CHUNK_THRESHOLD
-from meeting_transcriber.chunking import MapReduceGenerator
-from meeting_transcriber.config import TranscriptEntry
-from meeting_transcriber.config import UpdateResult
+from meeting_transcriber.chunking import CHUNK_THRESHOLD, MapReduceGenerator
+from meeting_transcriber.config import TranscriptEntry, UpdateResult
 from meeting_transcriber.templates import TemplateManager
 
 if TYPE_CHECKING:
@@ -54,6 +52,22 @@ INCREMENTAL_UPDATE_PROMPT = """あなたは議事録作成アシスタントで�
 
 【出力】
 更新後の議事録全体をMarkdown形式で出力してください。
+"""
+
+SESSION_INCREMENTAL_PROMPT = """新しい発言が追加されました。これまでの議事録に統合した完全版を出力してください。
+
+【ルール】
+- 新しい情報を適切なセクションに追加・統合する
+- 既存の内容と重複する場合は統合してまとめる
+- 議論の流れが分かるように時系列を意識する
+- 決定事項やTODOが出たら該当セクションに追加
+- 全体の構成・フォーマットは維持する
+
+【新しい発言】
+{new_transcripts}
+
+【出力】
+更新後の議事録全体をMarkdown形式で出力してください。余計な説明は不要です。
 """
 
 
@@ -104,6 +118,15 @@ class MinutesGenerator:
     ) -> str:
         """差分から議事録を更新する."""
         new_transcript_text = '\n'.join(str(t) for t in new_transcripts)
+
+        # セッション継続モード: Claudeが議事録履歴を覚えているので新規発言のみ送る
+        if self.backend.has_persistent_context:
+            prompt = SESSION_INCREMENTAL_PROMPT.format(new_transcripts=new_transcript_text)
+            try:
+                return self.backend.generate(prompt)
+            except RuntimeError:
+                # セッション枯渇・破損時: 新規UUIDで再生成して非セッションパスにフォールバック
+                self.backend.reset_context()
 
         prompt = INCREMENTAL_UPDATE_PROMPT.format(
             current_minutes=current_minutes,
