@@ -211,6 +211,11 @@ def parse_args() -> argparse.Namespace:
         action='store_true',
         help='更新ごとにバージョン保存',
     )
+    parser.add_argument(
+        '--transcript-only',
+        action='store_true',
+        help='文字起こしのみ（議事録を生成しない）',
+    )
 
     # その他
     parser.add_argument(
@@ -303,6 +308,8 @@ def main() -> int:
         merge_kwargs['update_interval'] = args.update_interval
     if args.version_history:
         merge_kwargs['version_history'] = True
+    if args.transcript_only:
+        merge_kwargs['transcript_only'] = True
 
     config = config.merge_args(**merge_kwargs)
 

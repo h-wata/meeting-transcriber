@@ -2,20 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import threading
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from textual.app import App
-from textual.app import ComposeResult
+from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
-from textual.containers import VerticalScroll
-from textual.widgets import Footer
-from textual.widgets import Header
-from textual.widgets import Input
-from textual.widgets import RichLog
-from textual.widgets import Static
+from textual.containers import Vertical, VerticalScroll
+from textual.widgets import Footer, Header, Input, RichLog, Static
 from textual.worker import get_current_worker
 
 if TYPE_CHECKING:
@@ -162,7 +156,9 @@ class MeetingTranscriberApp(App):
 
         self.log_message('[green]録音開始...[/green]')
         self.log_message(f'ステップ: {self.config.step_duration}秒 | ウィンドウ: {self.config.window_duration}秒')
-        if self.config.auto_update:
+        if self.config.transcript_only:
+            self.log_message('[yellow]文字起こしのみモード（議事録は生成されません）[/yellow]')
+        elif self.config.auto_update:
             self.log_message(f'[cyan]自動更新: {self.config.update_interval}秒間隔[/cyan]')
         self.update_status('録音中')
 
@@ -173,7 +169,7 @@ class MeetingTranscriberApp(App):
         self.run_worker(self.transcribe_worker, exclusive=True, thread=True)
 
         # 自動更新タイマーを開始
-        if self.config.auto_update:
+        if self.config.auto_update and not self.config.transcript_only:
             self.set_interval(self.config.update_interval, self._auto_update)
 
     def _auto_update(self) -> None:
@@ -265,6 +261,10 @@ class MeetingTranscriberApp(App):
 
     def _do_update(self, full: bool = False) -> None:
         """議事録を更新する."""
+        if self.config.transcript_only:
+            self.log_message('[yellow]文字起こしのみモードです（議事録は生成されません）[/yellow]')
+            return
+
         if self._updating:
             self.log_message('[yellow]更新中です...[/yellow]')
             return
@@ -350,16 +350,19 @@ class MeetingTranscriberApp(App):
 
         output_path = None
         if transcripts_copy:
-            # 最終更新
-            if not self.updater.current_minutes:
-                self.updater.update(transcripts_copy, full=True)
+            if self.config.transcript_only:
+                output_path = self.updater.save_transcript_only(transcripts_copy)
             else:
-                new_transcripts = self.updater.get_new_transcripts(transcripts_copy)
-                if new_transcripts:
-                    self.updater.update(transcripts_copy, full=False)
+                # 最終更新
+                if not self.updater.current_minutes:
+                    self.updater.update(transcripts_copy, full=True)
+                else:
+                    new_transcripts = self.updater.get_new_transcripts(transcripts_copy)
+                    if new_transcripts:
+                        self.updater.update(transcripts_copy, full=False)
 
-            # 保存
-            output_path = self.updater.save(transcripts_copy)
+                # 保存
+                output_path = self.updater.save(transcripts_copy)
 
         # 終了（出力パスを返す）
         self.exit(output_path)
@@ -375,6 +378,11 @@ class MeetingTranscriberApp(App):
 
         # 入力欄をクリア
         event.input.value = ''
+
+        # 文字起こしのみモードでは議事録修正を受け付けない
+        if self.config.transcript_only:
+            self.log_message('[yellow]文字起こしのみモードです（議事録は生成されません）[/yellow]')
+            return
 
         # 議事録がなければエラー
         if not self.updater.current_minutes:

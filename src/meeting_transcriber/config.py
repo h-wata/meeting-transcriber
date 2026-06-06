@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -107,6 +106,7 @@ class Config:
     auto_update: bool = False
     update_interval: int = 120
     version_history: bool = True
+    transcript_only: bool = False  # 文字起こしのみ（議事録を生成しない）
 
     def get_output_path(self) -> Path:
         """実際の出力先パスを取得."""
@@ -174,6 +174,7 @@ class Config:
             'auto_update': self.auto_update,
             'update_interval': self.update_interval,
             'version_history': self.version_history,
+            'transcript_only': self.transcript_only,
         }
         for key, value in kwargs.items():
             if value is not None:

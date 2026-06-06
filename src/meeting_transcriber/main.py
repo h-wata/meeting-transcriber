@@ -42,8 +42,8 @@ class MeetingTranscriber:
         # 会議1回 = 1セッション: Claude側に会議の文脈を蓄積し、プロンプトキャッシュを有効化する
         self.session_id = str(uuid.uuid4())
 
-        # バックエンドの初期化
-        self.backend = get_backend(config, session_id=self.session_id)
+        # バックエンドの初期化（文字起こしのみモードではLLM接続不要）
+        self.backend = None if config.transcript_only else get_backend(config, session_id=self.session_id)
 
         # 各コンポーネントの初期化
         self.recorder = AudioRecorder(
@@ -59,7 +59,7 @@ class MeetingTranscriber:
             device=config.compute_device,
         )
 
-        self.generator = MinutesGenerator(self.backend, self.template_manager)
+        self.generator = None if config.transcript_only else MinutesGenerator(self.backend, self.template_manager)
 
         output_dir = config.get_output_path()
         self.updater = MinutesUpdater(
@@ -135,6 +135,10 @@ class MeetingTranscriber:
 
     def _handle_update(self, full: bool = False) -> None:
         """議事録更新を処理する."""
+        if self.config.transcript_only:
+            print('\r文字起こしのみモードです（議事録は生成されません）')
+            return
+
         if self._updating:
             print('\r更新中です...')
             return
@@ -236,7 +240,7 @@ class MeetingTranscriber:
                         break
 
                     # 自動更新モード
-                    if self.config.auto_update:
+                    if self.config.auto_update and not self.config.transcript_only:
                         elapsed = (datetime.now() - self.start_time).total_seconds()
                         if elapsed > 0 and int(elapsed) % self.config.update_interval == 0:
                             if not self._updating:
@@ -258,20 +262,25 @@ class MeetingTranscriber:
             transcripts_copy = list(self.transcripts)
 
         if transcripts_copy:
-            print('最終議事録を生成中...')
-
-            # 最終更新
-            if not self.updater.current_minutes:
-                self.updater.update(transcripts_copy, full=True)
+            if self.config.transcript_only:
+                path = self.updater.save_transcript_only(transcripts_copy)
+                print('文字起こしを保存しました')
+                print(f'  出力: {path}')
             else:
-                new_transcripts = self.updater.get_new_transcripts(transcripts_copy)
-                if new_transcripts:
-                    self.updater.update(transcripts_copy, full=False)
+                print('最終議事録を生成中...')
 
-            # 保存
-            path = self.updater.save(transcripts_copy)
-            print('完了しました')
-            print(f'  出力: {path}')
+                # 最終更新
+                if not self.updater.current_minutes:
+                    self.updater.update(transcripts_copy, full=True)
+                else:
+                    new_transcripts = self.updater.get_new_transcripts(transcripts_copy)
+                    if new_transcripts:
+                        self.updater.update(transcripts_copy, full=False)
+
+                # 保存
+                path = self.updater.save(transcripts_copy)
+                print('完了しました')
+                print(f'  出力: {path}')
 
             # ファイルを開く
             if self.config.open_after:
