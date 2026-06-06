@@ -224,6 +224,13 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help='既存の文字起こしファイルから議事録を生成（globパターン可）',
     )
+    parser.add_argument(
+        '-i',
+        '--input',
+        type=Path,
+        default=None,
+        help='音声/動画ファイルから文字起こし→議事録生成（wav/mp3/mp4/mov等、globパターン可、要ffmpeg）',
+    )
 
     # その他
     parser.add_argument(
@@ -285,6 +292,167 @@ def parse_transcript_file(path: Path) -> list:
         entries.append(TranscriptEntry(timestamp=datetime.now(), text=text.strip(), index=0))
 
     return entries
+
+
+_AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus', '.aac', '.wma'}
+_VIDEO_EXTENSIONS = {'.mp4', '.mov', '.mkv', '.webm', '.avi', '.flv', '.wmv', '.m4v'}
+_MEDIA_EXTENSIONS = _AUDIO_EXTENSIONS | _VIDEO_EXTENSIONS
+
+
+def _check_ffmpeg_available() -> bool:
+    """Check that ffmpeg is on PATH."""
+    import subprocess
+
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5, check=False)
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+
+
+def run_from_audio(args: argparse.Namespace, config: Config) -> int:
+    """音声/動画ファイルから文字起こし → 議事録生成する."""
+    import glob as glob_module
+    from datetime import datetime, timedelta
+
+    from meeting_transcriber.backends.factory import get_backend
+    from meeting_transcriber.config import TranscriptEntry
+    from meeting_transcriber.minutes import MinutesGenerator, MinutesUpdater
+    from meeting_transcriber.transcriber import Transcriber
+
+    # CLI 引数を config にマージ
+    merge_kwargs = {}
+    if args.backend:
+        merge_kwargs['backend'] = args.backend
+    if args.template:
+        merge_kwargs['template'] = args.template
+    if args.model:
+        merge_kwargs['model_size'] = args.model
+    if args.language:
+        merge_kwargs['language'] = args.language
+    if args.compute_device:
+        merge_kwargs['compute_device'] = args.compute_device
+    if args.output:
+        merge_kwargs['output_dir'] = args.output.expanduser()
+    if args.simple_output:
+        merge_kwargs['simple_output_dir'] = args.simple_output.expanduser()
+    if args.transcript_only:
+        merge_kwargs['transcript_only'] = True
+    config = config.merge_args(**merge_kwargs)
+
+    # ファイル展開
+    input_path = args.input.expanduser()
+    if '*' in str(input_path) or '?' in str(input_path):
+        files = sorted(Path(p) for p in glob_module.glob(str(input_path)))
+    elif input_path.is_dir():
+        files = sorted(p for p in input_path.iterdir() if p.suffix.lower() in _MEDIA_EXTENSIONS)
+    else:
+        files = [input_path]
+
+    if not files:
+        print(f'ファイルが見つかりません: {input_path}', file=sys.stderr)
+        return 1
+
+    # 拡張子チェック（警告のみ、未知の拡張子は ffmpeg に任せる）
+    for f in files:
+        if f.suffix.lower() not in _MEDIA_EXTENSIONS:
+            print(f'警告: 未知の拡張子 {f.suffix} ({f.name})。ffmpeg でデコードを試みます', file=sys.stderr)
+
+    # ffmpeg 確認
+    if not _check_ffmpeg_available():
+        print(
+            'エラー: ffmpeg が見つかりません。音声/動画ファイル入力には ffmpeg が必要です。\n'
+            '  Ubuntu/Debian: sudo apt install ffmpeg\n'
+            '  macOS: brew install ffmpeg',
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f'{len(files)} 件のメディアファイルを処理します')
+
+    # Whisper / Backend / Template 初期化
+    transcriber = Transcriber(
+        model_size=config.model_size,
+        language=config.language,
+        device=config.compute_device,
+    )
+
+    backend = None if config.transcript_only else get_backend(config)
+    template_manager = TemplateManager(config.templates_dir)
+    template_manager.install_builtin_templates()
+    template = template_manager.get_template(config.template)
+    if template is None and not config.transcript_only:
+        print(f'エラー: テンプレートが見つかりません: {config.template}', file=sys.stderr)
+        return 1
+    generator = None if config.transcript_only else MinutesGenerator(backend, template_manager)
+
+    output_root = config.get_output_path()
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    overall_ok = True
+    for i, media_path in enumerate(files, 1):
+        print(f'\n[{i}/{len(files)}] {media_path}')
+        try:
+            # ファイル毎にセッションディレクトリを作る (simple モードでない場合)
+            file_stem = media_path.stem
+            start_time = datetime.now()
+            session_name = f'{file_stem}_{start_time.strftime("%Y%m%d_%H%M%S")}'
+
+            # 文字起こし: segment ごとの (start, end, text) → TranscriptEntry
+            entries: list[TranscriptEntry] = []
+            last_pct = -1
+            for idx, (start_sec, _end_sec, text) in enumerate(transcriber.transcribe_file(media_path)):
+                entry = TranscriptEntry(
+                    timestamp=start_time + timedelta(seconds=start_sec),
+                    text=text,
+                    index=idx,
+                )
+                entries.append(entry)
+                # 簡易進捗表示（10% 刻み）
+                if idx % 20 == 0:
+                    print(f'  ...{idx} segments transcribed (t={start_sec:.0f}s)')
+                last_pct = idx
+
+            if not entries:
+                print('  スキップ（無音または認識結果が空）')
+                continue
+
+            print(f'  {len(entries)} segments を取得')
+
+            # Updater で出力構造を統一
+            updater = MinutesUpdater(
+                generator=generator,
+                output_dir=output_root,
+                template=template,
+                start_time=start_time,
+                filename_format=session_name,  # ファイル名から固有のセッション名
+                version_history=False,
+                simple_mode=config.simple_output_dir is not None,
+            )
+
+            if config.transcript_only:
+                save_path = updater.save_transcript_only(entries)
+                print(f'  完了 → {save_path}')
+                continue
+
+            # 議事録生成
+            result = updater.update(entries, full=True)
+            if not result.success:
+                print(f'  議事録生成失敗: {result.error}', file=sys.stderr)
+                overall_ok = False
+                continue
+
+            save_path = updater.save(entries)
+            print(f'  完了 → {save_path}')
+
+        except Exception as e:  # noqa: BLE001
+            print(f'  エラー: {e}', file=sys.stderr)
+            overall_ok = False
+
+        _ = last_pct  # silence linter
+
+    print(f'\n全 {len(files)} 件の処理が完了しました')
+    return 0 if overall_ok else 2
 
 
 def run_batch(args: argparse.Namespace, config: Config) -> int:
@@ -385,6 +553,10 @@ def main() -> int:
     # バッチ処理モード
     if args.from_file:
         return run_batch(args, config)
+
+    # 音声/動画ファイル入力モード
+    if args.input:
+        return run_from_audio(args, config)
 
     # コマンドライン引数をマージ
     merge_kwargs = {}

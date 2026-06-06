@@ -637,13 +637,28 @@ meeting-transcriber --list-templates
 
 LLM 枠を節約したい場面、または後で `--from-file` でバッチ処理する想定で使用。
 
-### 3.13 バッチ処理
+### 3.13 バッチ処理（テキスト → 議事録）
 
 `--from-file PATH` で既存 `transcript_raw.txt` から議事録のみを後追い生成。
 
 - 単一ファイル / ディレクトリ（再帰探索）/ glob パターンに対応
 - 各ファイルを `parse_transcript_file` でエントリ化 → `generate_full` 実行
 - 既に `minutes.md` がある対象はスキップ（冪等性）
+
+### 3.14 音声/動画ファイル入力
+
+`-i, --input PATH` で録音済みの音声/動画ファイルから文字起こし → 議事録生成。
+
+- ffmpeg 必須（faster-whisper が内部で ffmpeg を呼び出す）
+- 対応音声: \`.wav .mp3 .flac .m4a .ogg .opus .aac .wma\`
+- 対応動画: \`.mp4 .mov .mkv .webm .avi .flv .wmv .m4v\`
+  （動画は音声トラックを自動抽出）
+- 単一ファイル / ディレクトリ / glob パターンに対応
+- `Transcriber.transcribe_file()` が segment 単位の `(start_sec, end_sec, text)` をストリームで返す
+  → 長尺ファイルでも省メモリ
+- 出力先: \`<output_dir>/<filename>_<timestamp>/{minutes.md, transcript_raw.txt}\`
+- `--transcript-only` 併用で文字起こしのみ
+- 既存マイク入力経路 (\`AudioRecorder\`) は温存、選択肢を1つ増やすだけ
 
 ---
 

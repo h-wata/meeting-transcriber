@@ -76,9 +76,31 @@ meeting-transcriber -t 1on1               # テンプレート (default/1on1/bra
 | `q` | 終了 |
 | `c` | コマンド入力（TUI のみ、Claude に修正指示） |
 
+### 音声/動画ファイル入力
+
+録音済みの音声/動画ファイルから直接議事録を生成（要 `ffmpeg`）:
+
+```bash
+meeting-transcriber --input meeting.wav             # 音声ファイル
+meeting-transcriber --input meeting.mp4             # 動画ファイル
+meeting-transcriber --input "~/recordings/*.wav"    # glob
+meeting-transcriber --input ./recordings/           # ディレクトリ
+meeting-transcriber --input meeting.mp4 --transcript-only  # 文字起こしのみ
+```
+
+対応形式: `.wav .mp3 .flac .m4a .ogg .opus .aac` / `.mp4 .mov .mkv .webm .avi` など ffmpeg がデコードできるもの全般。
+出力は `<output_dir>/<filename>_<timestamp>/{minutes.md, transcript_raw.txt}`。
+
+```bash
+# Ubuntu/Debian
+sudo apt install ffmpeg
+# macOS
+brew install ffmpeg
+```
+
 ### バッチ処理
 
-`transcript_raw.txt` から議事録だけ後で生成:
+既存の `transcript_raw.txt` から議事録だけ後で生成:
 
 ```bash
 meeting-transcriber --from-file <path>                # 単一 / ディレクトリ / glob

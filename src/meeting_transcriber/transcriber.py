@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from faster_whisper import WhisperModel
+from pathlib import Path
+from typing import Iterable
+
 import numpy as np
+from faster_whisper import WhisperModel
 
 
 def _detect_cuda_available() -> bool:
@@ -74,3 +77,40 @@ class Transcriber:
                 texts.append(text)
 
         return ' '.join(texts)
+
+    def transcribe_file(
+        self,
+        path: Path,
+        progress_callback=None,  # noqa: ANN001
+    ) -> Iterable[tuple[float, float, str]]:
+        """音声/動画ファイル全体を文字起こしする.
+
+        faster-whisper が内部で ffmpeg を呼んでデコードするため、
+        WAV/MP3/FLAC/M4A/OGG/MP4/MOV/MKV など ffmpeg がサポートする形式すべてに対応。
+
+        Yields (start_sec, end_sec, text) のタプルを順次返す（長尺ファイルでも省メモリ）。
+        progress_callback(start_sec, duration_sec) が指定されていれば各 segment で呼ばれる。
+        """
+        lang = None if self.language == 'auto' else self.language
+
+        segments, info = self.model.transcribe(
+            str(path),
+            language=lang,
+            beam_size=5,
+            vad_filter=True,
+            vad_parameters={
+                'threshold': 0.55,
+                'min_silence_duration_ms': 300,
+                'speech_pad_ms': 100,
+            },
+        )
+
+        duration = info.duration
+
+        for segment in segments:
+            text = segment.text.strip()
+            if not text:
+                continue
+            if progress_callback is not None:
+                progress_callback(segment.start, duration)
+            yield (segment.start, segment.end, text)
