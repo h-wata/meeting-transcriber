@@ -5,10 +5,14 @@
 ## 特徴
 
 - リアルタイム音声認識（faster-whisper）
-- Claude APIによる議事録自動生成
-- TUIインターフェース（Lazygit風の3パネル構成）
-- 差分更新による効率的な議事録更新
+- 複数LLMバックエンド対応（Claude Code CLI / Anthropic API / Claude Agent SDK / ローカルLLM）
+- 2種類のUI（ブラウザ向け **Web UI** ／ ターミナル向け **TUI**）
+- 会議中に Claude に相談できる **AIチャットパネル**（Web UI）
+- セッション継続で会議の文脈を Claude に蓄積（プロンプトキャッシュ最適化）
+- 差分更新／圧縮更新／Map-Reduce による効率的な議事録更新
 - 複数のテンプレート対応（デフォルト、1on1、ブレスト、スタンドアップ、クライアント）
+- 既存文字起こしからのバッチ処理（`--from-file`）
+- 文字起こし専用モード（`--transcript-only`、LLM接続なし）
 - シンプル出力モード（単一ファイル出力）
 
 ## 必要要件
@@ -93,6 +97,9 @@ meeting-transcriber --list-devices
 # TUIモードで起動（デフォルト）
 meeting-transcriber
 
+# Web UIモードで起動（ブラウザが自動で開く）
+meeting-transcriber --web
+
 # 出力先を指定
 meeting-transcriber -o ~/Documents/meetings/
 
@@ -102,6 +109,41 @@ meeting-transcriber -m medium
 # GPU使用
 meeting-transcriber --compute-device cuda
 ```
+
+### Web UIモード（推奨）
+
+```bash
+meeting-transcriber --web
+```
+
+`http://127.0.0.1:8765` がブラウザで自動的に開きます。3 カラム構成：
+
+- **文字起こし** + **ログ**（左カラム）: リアルタイム表示
+- **議事録プレビュー**（中央）: Markdown レンダリング、自動更新
+- **AIに聞く**（右カラム）: 会議中にClaudeに相談できるチャットパネル
+
+#### AIチャットパネル
+
+「この2人の意見、噛み合ってる？」「この議論の論点を整理して」といった
+質問を、その時点の文字起こしを文脈として Claude が答えます。
+議事録生成とは別セッションで動くため、議事録の構造には影響しません。
+
+```bash
+# Web UI起動時のオプション
+meeting-transcriber --web                          # デフォルト（127.0.0.1:8765）
+meeting-transcriber --web --web-port 8080          # ポート変更
+meeting-transcriber --web --no-browser             # ブラウザ自動起動なし
+```
+
+#### キーボードショートカット（Web UI）
+
+| キー | 機能       |
+| ---- | ---------- |
+| `u`  | 差分更新   |
+| `f`  | フル更新   |
+| `s`  | 保存       |
+| `p`  | 一時停止/再開 |
+| `q`  | 終了       |
 
 ### TUI操作
 
@@ -189,6 +231,27 @@ meeting-transcriber --from-file "~/Documents/v2t/meeting_202512*/transcript_raw.
 meeting-transcriber --simple-output ~/Documents/meetings/
 ```
 
+### 文字起こし専用モード
+
+LLMバックエンドに接続せず、文字起こしだけ実行します。後でバッチ処理で議事録を生成する想定や、
+LLM枠を消費したくない場面に便利です。
+
+```bash
+meeting-transcriber --transcript-only
+```
+
+### セッション継続によるコンテキスト活用
+
+Claude Code CLIバックエンド使用時、会議1回 = 1セッション ID として `--session-id` 付きで
+`claude -p` を呼び出します。これにより：
+
+- プロンプトキャッシュが効いてコスト・速度が改善
+- Claude側に会議の流れが蓄積され、議事録品質が向上
+- AIチャットも別セッションで会議文脈を保持
+
+ユーザーが意識する設定は不要で、起動時に自動でUUIDが生成されます。
+詳細は [docs/adr/0001-claude-cli-auth-and-billing.md](docs/adr/0001-claude-cli-auth-and-billing.md) を参照。
+
 ## コマンドラインオプション
 
 ```
@@ -211,15 +274,28 @@ Whisper設定:
   -o, --output PATH                          出力ディレクトリ
   -f, --filename FORMAT                      ファイル名フォーマット
   --simple-output PATH                       シンプル出力モード（単一ファイル出力）
+  --open-after                               終了後にファイルを開く
 
 テンプレート:
   -t, --template NAME                        テンプレート名
+
+更新設定:
+  --auto-update                              自動更新モードを有効化
+  --update-interval SEC                      自動更新間隔（秒）
+  --version-history                          更新ごとにバージョン保存
+  --transcript-only                          文字起こしのみ（議事録を生成しない）
+
+UI:
+  --no-tui                                   シンプルモードで実行（TUI無効）
+  --web                                      Web UIモードで実行
+  --web-host HOST                            Web UIのバインドホスト（default: 127.0.0.1）
+  --web-port PORT                            Web UIのポート（default: 8765）
+  --no-browser                               Web UIモードでブラウザを自動起動しない
 
 その他:
   --list-devices                             音声デバイス一覧
   --list-templates                           テンプレート一覧
   --show-config                              現在の設定を表示
-  --no-tui                                   シンプルモードで実行
 ```
 
 ## 設定ファイル
@@ -250,6 +326,7 @@ template: default          # default, 1on1, brainstorm, standup, client
 auto_update: true          # 自動更新を有効化
 update_interval: 120       # 自動更新間隔（秒）
 version_history: true      # 更新ごとにバージョン保存
+transcript_only: false     # 文字起こしのみ（議事録を生成しない）
 ```
 
 テンプレートは `~/.config/meeting-transcriber/templates/` に配置されます。
@@ -297,4 +374,5 @@ MIT License
 
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) - 高速なWhisper実装
 - [Textual](https://github.com/Textualize/textual) - TUIフレームワーク
+- [FastAPI](https://fastapi.tiangolo.com/) - Web UIサーバー
 - [Anthropic Claude](https://www.anthropic.com/) - 議事録生成AI
