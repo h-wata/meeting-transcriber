@@ -94,6 +94,16 @@ footer { padding: 8px 12px; background: #181825; border-top: 1px solid #313244; 
 .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #a6e3a1; margin-right: 6px; animation: pulse 2s infinite; }
 .pulse.paused { background: #f9e2af; animation: none; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+#toolbar { display: flex; gap: 16px; padding: 8px 12px; background: #11111b; border-bottom: 1px solid #313244; align-items: center; flex-wrap: wrap; }
+.toolbar-group { display: flex; align-items: center; gap: 4px; }
+.toolbar-label { color: #6c7086; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; padding-right: 6px; border-right: 1px solid #313244; margin-right: 4px; }
+.toolbar-group button { padding: 6px 14px; font-size: 13px; }
+.toolbar-group .key-hint { color: #6c7086; font-size: 10px; margin-left: 2px; }
+button.warning { background: #f9e2af; color: #1e1e2e; }
+button.warning:hover { background: #fab387; }
+button.success { background: #a6e3a1; color: #1e1e2e; }
+button.success:hover { background: #94e2d5; }
 </style>
 </head>
 <body>
@@ -101,14 +111,22 @@ footer { padding: 8px 12px; background: #181825; border-top: 1px solid #313244; 
   <header>
     <h1><span class="pulse" id="pulse"></span>Meeting Transcriber</h1>
     <div id="status">接続中...</div>
-    <div id="controls">
-      <button id="btn-update">差分更新 (U)</button>
-      <button id="btn-full" class="primary">フル更新 (F)</button>
-      <button id="btn-save">保存 (S)</button>
-      <button id="btn-pause">一時停止 (P)</button>
-      <button id="btn-quit" class="danger">終了 (Q)</button>
-    </div>
   </header>
+  <div id="toolbar">
+    <div class="toolbar-group">
+      <span class="toolbar-label">議事録</span>
+      <button id="btn-update" title="差分更新 (U)">差分更新<span class="key-hint">U</span></button>
+      <button id="btn-full" class="primary" title="フル更新 (F)">フル更新<span class="key-hint">F</span></button>
+      <button id="btn-save" title="保存 (S)">保存<span class="key-hint">S</span></button>
+    </div>
+    <div class="toolbar-group">
+      <span class="toolbar-label">録音</span>
+      <button id="btn-pause" class="warning" title="一時停止 (P)">一時停止<span class="key-hint">P</span></button>
+    </div>
+    <div class="toolbar-group" style="margin-left: auto;">
+      <button id="btn-quit" class="danger" title="終了 (Q)">終了<span class="key-hint">Q</span></button>
+    </div>
+  </div>
   <main>
     <div id="left">
       <div class="panel" id="transcript-panel">
@@ -221,6 +239,20 @@ function setStatus(s) {
   transcriptCount.textContent = (s.transcript_count || 0) + ' 件';
   updateCount.textContent = '更新: ' + (s.update_count || 0) + '回';
   if (s.paused) pulse.classList.add('paused'); else pulse.classList.remove('paused');
+
+  // 一時停止/再開ボタンのトグル
+  const pauseBtn = document.getElementById('btn-pause');
+  if (s.paused) {
+    pauseBtn.innerHTML = '再開<span class="key-hint">P</span>';
+    pauseBtn.classList.remove('warning');
+    pauseBtn.classList.add('success');
+    pauseBtn.title = '再開 (P)';
+  } else {
+    pauseBtn.innerHTML = '一時停止<span class="key-hint">P</span>';
+    pauseBtn.classList.remove('success');
+    pauseBtn.classList.add('warning');
+    pauseBtn.title = '一時停止 (P)';
+  }
 }
 
 const chatBody = document.getElementById('chat-body');
