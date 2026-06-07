@@ -132,6 +132,19 @@ class Config:
     version_history: bool = True
     transcript_only: bool = False  # 文字起こしのみ（議事録を生成しない）
 
+    # ホットワード（Web UIのみ）: 発話中に該当ワードが検出されたら以降のテキストをAIへの質問として扱う
+    hotwords_enabled: bool = False
+    hotwords: list[str] = field(
+        default_factory=lambda: [
+            'ねえクロード',
+            'クロードさん',
+            'Hey Claude',
+            'AIさん',
+            'AIに聞きたい',
+        ]
+    )
+    hotword_min_question_length: int = 3  # ホットワード後のテキストがこの文字数未満なら無視
+
     def get_output_path(self) -> Path:
         """実際の出力先パスを取得."""
         if self.simple_output_dir:
@@ -199,6 +212,9 @@ class Config:
             'update_interval': self.update_interval,
             'version_history': self.version_history,
             'transcript_only': self.transcript_only,
+            'hotwords_enabled': self.hotwords_enabled,
+            'hotwords': self.hotwords,
+            'hotword_min_question_length': self.hotword_min_question_length,
         }
         for key, value in kwargs.items():
             if value is not None:

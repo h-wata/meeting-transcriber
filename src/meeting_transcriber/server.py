@@ -640,6 +640,49 @@ class WebUIServer:
                 self.transcript_index += 1
             self._broadcast({'type': 'transcript', 'text': str(entry)})
 
+            # ホットワード検出: マッチしたら AI チャットへ自動投稿
+            question = self._extract_hotword_question(text)
+            if question is not None:
+                self._log(f'ホットワード検出: 「{question}」をAIへ質問', 'info')
+                self._handle_chat(question)
+
+    def _extract_hotword_question(self, text: str) -> str | None:
+        """文字起こし text からホットワード以降の質問テキストを抽出する.
+
+        マッチしない、無効化されている、文字起こし専用モード、質問が短すぎる場合は None。
+        複数ホットワードがマッチした場合は最も後ろにある hit を採用（直前を文脈とみなす）。
+        """
+        if not getattr(self.config, 'hotwords_enabled', False):
+            return None
+        if self.config.transcript_only:
+            return None
+        hotwords = getattr(self.config, 'hotwords', None) or []
+        if not hotwords:
+            return None
+
+        lower_text = text.lower()
+        best_idx = -1
+        best_word_len = 0
+        for word in hotwords:
+            if not word:
+                continue
+            idx = lower_text.find(word.lower())
+            if idx == -1:
+                continue
+            # より後ろのホットワードを優先（質問は会話の途中で出る想定）
+            if idx > best_idx:
+                best_idx = idx
+                best_word_len = len(word)
+
+        if best_idx < 0:
+            return None
+
+        question = text[best_idx + best_word_len :].strip(' 　、。.!！?？\n')
+        min_len = getattr(self.config, 'hotword_min_question_length', 3)
+        if len(question) < min_len:
+            return None
+        return question
+
     def _auto_update_loop(self) -> None:
         import time
 

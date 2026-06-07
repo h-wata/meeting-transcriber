@@ -74,3 +74,17 @@ auto_update: false          # 自動更新（true で update_interval ごとに�
 update_interval: 120        # 自動更新間隔（秒）
 version_history: true       # 更新ごとに minutes_vXXX.md を session_dir/history に保存
 transcript_only: false      # 文字起こしのみ（LLM 接続なし、議事録未生成）
+
+# ─────────────────────────────────────────────
+# ホットワード検出（Web UI のみ）
+# ─────────────────────────────────────────────
+# 会議中の発話に特定のホットワードが含まれていたら、それ以降のテキストを
+# AI チャット欄への質問として自動投稿する。話しながら Claude に相談できる。
+hotwords_enabled: false      # 有効化したい時は true に
+hotwords:
+  - ねえクロード
+  - クロードさん
+  - Hey Claude
+  - AIさん
+  - AIに聞きたい
+hotword_min_question_length: 3   # ホットワード後のテキストがこの文字数未満なら無視
