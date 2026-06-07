@@ -90,7 +90,13 @@ footer { padding: 8px 12px; background: #181825; border-top: 1px solid #313244; 
 #chat-input:focus { outline: none; border-color: #89b4fa; }
 #chat-typing { color: #6c7086; font-size: 11px; font-style: italic; padding: 4px 10px; }
 
-.empty { color: #6c7086; font-style: italic; text-align: center; padding: 20px; }
+.empty { color: #6c7086; font-style: italic; text-align: center; padding: 30px 20px; }
+.empty button { margin-top: 12px; padding: 10px 20px; font-size: 14px; font-weight: 600; }
+.minutes-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; color: #89dceb; }
+.spinner { display: inline-block; width: 40px; height: 40px; border: 4px solid #313244; border-top-color: #89b4fa; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
+.minutes-loading-text { font-size: 14px; color: #cdd6f4; font-weight: 500; }
+.minutes-loading-sub { font-size: 11px; color: #6c7086; margin-top: 4px; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .pulse { display: inline-block; width: 11px; height: 11px; border-radius: 50%; background: #a6e3a1; margin-right: 10px; animation: pulse 2s infinite; box-shadow: 0 0 8px #a6e3a1; }
 .pulse.paused { background: #f9e2af; animation: none; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
@@ -140,7 +146,7 @@ button.success:hover { background: #94e2d5; }
     </div>
     <div class="panel" id="minutes-panel">
       <div class="panel-header"><span>議事録プレビュー</span><span id="update-count">更新: 0回</span></div>
-      <div class="panel-body"><div id="minutes-content"><div class="empty">議事録はまだ生成されていません</div></div></div>
+      <div class="panel-body"><div id="minutes-content"><div class="empty">議事録はまだ生成されていません<br><button class="primary" onclick="document.getElementById('btn-full').click()">[F] 今すぐ生成</button></div></div></div>
     </div>
     <div class="panel" id="chat-panel">
       <div class="panel-header"><span>AIに聞く</span><span id="chat-typing-area"></span></div>
@@ -222,14 +228,27 @@ function renderMarkdown(md) {
   }).join('\\n');
 }
 
+let currentMinutesMarkdown = '';
 function updateMinutes(markdown) {
+  currentMinutesMarkdown = markdown || '';
   if (!markdown) {
-    minutesContent.innerHTML = '<div class="empty">議事録はまだ生成されていません</div>';
+    minutesContent.innerHTML = '<div class="empty">議事録はまだ生成されていません<br><button class="primary" onclick="document.getElementById(\'btn-full\').click()">[F] 今すぐ生成</button></div>';
     return;
   }
   minutesContent.innerHTML = renderMarkdown(markdown);
 }
 
+function showMinutesLoading(updateNumber) {
+  const subText = updateNumber > 0 ? `（${updateNumber + 1}回目の生成）` : '（初回生成、少し時間がかかります）';
+  minutesContent.innerHTML =
+    '<div class="minutes-loading">' +
+    '<div class="spinner"></div>' +
+    '<div class="minutes-loading-text">議事録を生成中...</div>' +
+    '<div class="minutes-loading-sub">' + subText + '</div>' +
+    '</div>';
+}
+
+let isUpdating = false;
 function setStatus(s) {
   let text = s.text || '';
   if (typeof s.cumulative_cost_usd === 'number' && s.cumulative_cost_usd > 0) {
@@ -239,6 +258,15 @@ function setStatus(s) {
   transcriptCount.textContent = (s.transcript_count || 0) + ' 件';
   updateCount.textContent = '更新: ' + (s.update_count || 0) + '回';
   if (s.paused) pulse.classList.add('paused'); else pulse.classList.remove('paused');
+
+  // 議事録更新中ならスピナーを表示、終わったら通常表示に戻す
+  const nowUpdating = !!s.updating;
+  if (nowUpdating && !isUpdating) {
+    showMinutesLoading(s.update_count || 0);
+  } else if (!nowUpdating && isUpdating) {
+    updateMinutes(currentMinutesMarkdown);
+  }
+  isUpdating = nowUpdating;
 
   // 一時停止/再開ボタンのトグル
   const pauseBtn = document.getElementById('btn-pause');
@@ -553,6 +581,7 @@ class WebUIServer:
             'update_count': self.updater.update_count if self.updater else 0,
             'paused': self.recorder.is_paused(),
             'cumulative_cost_usd': cost,
+            'updating': self._updating,
         }
 
     def _collect_cumulative_cost(self) -> float:
