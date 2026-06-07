@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Application output (議事録セッションディレクトリのデフォルト出力先)
+output/
