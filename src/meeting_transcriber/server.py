@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import signal
 import threading
 import uuid
@@ -21,6 +22,9 @@ if TYPE_CHECKING:
     from meeting_transcriber.config import Config
     from meeting_transcriber.minutes import MinutesUpdater
     from meeting_transcriber.transcriber import Transcriber
+
+# 保存時のファイル名サニタイズ用: 英数 / 日本語 / ハイフン / アンダースコア / ドット / 空白のみ許可
+_SAFE_FILENAME_RE = re.compile(r'^[\w\-. ぀-ヿ㐀-鿿]{1,128}$')
 
 INDEX_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -1001,10 +1005,19 @@ class WebUIServer:
         # カスタム保存
         from pathlib import Path as _Path
 
+        # ファイル名はパストラバーサル攻撃を防ぐため厳格にサニタイズ
+        # (output_dir は localhost のユーザー自身が任意指定する用途なので制限しない)
+        stem = body.filename or self.start_time.strftime(self.updater.filename_format)
+        if '/' in stem or '\\' in stem or '..' in stem or not _SAFE_FILENAME_RE.match(stem):
+            self._log(
+                f'保存エラー: ファイル名が無効です (英数/日本語/-_. のみ128字以内): {stem!r}',
+                'error',
+            )
+            return
+
         try:
             target_dir = _Path(body.output_dir).expanduser().resolve() if body.output_dir else self.updater.output_dir
             target_dir.mkdir(parents=True, exist_ok=True)
-            stem = body.filename or self.start_time.strftime(self.updater.filename_format)
 
             saved = []
             if wants_transcript and transcripts_copy:
