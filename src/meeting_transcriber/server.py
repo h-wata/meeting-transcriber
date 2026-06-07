@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
@@ -101,6 +101,19 @@ footer { padding: 8px 12px; background: #181825; border-top: 1px solid #313244; 
 .shutdown-path { background: #11111b; border: 1px solid #313244; border-radius: 6px; padding: 10px 14px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #f5c2e7; word-break: break-all; margin-bottom: 16px; user-select: all; }
 .shutdown-error { background: #2d1b2a; border-left: 3px solid #f38ba8; padding: 8px 12px; margin: 12px 0; color: #f38ba8; font-size: 12px; text-align: left; }
 .shutdown-hint { font-size: 11px; color: #6c7086; margin-top: 20px; line-height: 1.5; }
+
+#save-overlay { position: fixed; inset: 0; background: rgba(20,20,30,0.85); display: flex; align-items: center; justify-content: center; z-index: 9998; backdrop-filter: blur(3px); }
+.save-modal { background: #1e1e30; border: 1px solid #45475a; border-radius: 12px; padding: 24px 28px; width: 520px; max-width: 92vw; box-shadow: 0 8px 32px rgba(0,0,0,0.4); color: #e0e6f3; }
+.save-modal h2 { font-size: 18px; margin-bottom: 16px; color: #cdd6f4; font-weight: 700; }
+.save-modal label { display: block; font-size: 11px; color: #6c7086; text-transform: uppercase; letter-spacing: 0.5px; margin: 12px 0 4px; }
+.save-modal input[type=text] { width: 100%; background: #11111b; color: #e0e6f3; border: 1px solid #313244; padding: 8px 10px; border-radius: 6px; font-size: 13px; font-family: "JetBrains Mono", monospace; }
+.save-modal input[type=text]:focus { outline: none; border-color: #89b4fa; }
+.save-kind { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.save-kind label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; text-transform: none; letter-spacing: normal; color: #cdd6f4; margin: 0; padding: 6px 12px; background: #11111b; border: 1px solid #313244; border-radius: 6px; cursor: pointer; }
+.save-kind input { margin: 0; }
+.save-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+.save-buttons button { padding: 8px 16px; font-size: 13px; }
+.save-disabled { opacity: 0.5; cursor: not-allowed; }
 .empty button { margin-top: 12px; padding: 10px 20px; font-size: 14px; font-weight: 600; }
 .minutes-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; color: #89dceb; }
 .spinner { display: inline-block; width: 40px; height: 40px; border: 4px solid #313244; border-top-color: #89b4fa; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
@@ -388,7 +401,85 @@ async function action(path) {
 
 document.getElementById('btn-update').onclick = () => action('update?full=false');
 document.getElementById('btn-full').onclick = () => action('update?full=true');
-document.getElementById('btn-save').onclick = () => action('save');
+document.getElementById('btn-save').onclick = () => openSaveDialog();
+
+async function openSaveDialog() {
+  let defaults = {filename: 'meeting', output_dir: '.', has_transcript: false, has_minutes: false};
+  try {
+    const r = await fetch('/api/save-defaults');
+    defaults = await r.json();
+  } catch (e) { addLog('保存デフォルト取得失敗: ' + e.message, 'error'); }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'save-overlay';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeSaveDialog(); });
+
+  const trDis = defaults.has_transcript ? '' : 'class="save-disabled"';
+  const mdDis = defaults.has_minutes ? '' : 'class="save-disabled"';
+  const bothDis = (defaults.has_transcript && defaults.has_minutes) ? '' : 'class="save-disabled"';
+  const defaultKind = defaults.has_minutes && defaults.has_transcript ? 'both' : (defaults.has_minutes ? 'minutes' : 'transcript');
+
+  overlay.innerHTML =
+    '<div class="save-modal">' +
+    '<h2>保存先を指定</h2>' +
+    '<label>ファイル名（拡張子なし）</label>' +
+    '<input type="text" id="save-filename" value="' + escapeHtml(defaults.filename) + '">' +
+    '<label>出力ディレクトリ（サーバー保存時のみ）</label>' +
+    '<input type="text" id="save-path" value="' + escapeHtml(defaults.output_dir) + '">' +
+    '<label>対象</label>' +
+    '<div class="save-kind">' +
+    '<label ' + bothDis + '><input type="radio" name="save-kind" value="both"' + (defaultKind === 'both' ? ' checked' : '') + (bothDis ? ' disabled' : '') + '> 議事録+文字起こし</label>' +
+    '<label ' + mdDis + '><input type="radio" name="save-kind" value="minutes"' + (defaultKind === 'minutes' ? ' checked' : '') + (mdDis ? ' disabled' : '') + '> 議事録(.md)のみ</label>' +
+    '<label ' + trDis + '><input type="radio" name="save-kind" value="transcript"' + (defaultKind === 'transcript' ? ' checked' : '') + (trDis ? ' disabled' : '') + '> 文字起こし(.txt)のみ</label>' +
+    '</div>' +
+    '<div class="save-buttons">' +
+    '<button onclick="closeSaveDialog()">キャンセル</button>' +
+    '<button onclick="doDownload()">ダウンロード</button>' +
+    '<button class="primary" onclick="doServerSave()">サーバーに保存</button>' +
+    '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+}
+
+function closeSaveDialog() {
+  const o = document.getElementById('save-overlay');
+  if (o) o.remove();
+}
+
+function _getSaveKind() {
+  const sel = document.querySelector('input[name="save-kind"]:checked');
+  return sel ? sel.value : 'transcript';
+}
+
+async function doServerSave() {
+  const filename = document.getElementById('save-filename').value.trim();
+  const output_dir = document.getElementById('save-path').value.trim();
+  const kind = _getSaveKind();
+  try {
+    await fetch('/api/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({filename, output_dir, kind}),
+    });
+    closeSaveDialog();
+  } catch (e) { addLog('保存エラー: ' + e.message, 'error'); }
+}
+
+async function doDownload() {
+  const kind = _getSaveKind();
+  const targets = [];
+  if (kind === 'both') { targets.push('transcript', 'minutes'); }
+  else { targets.push(kind); }
+  for (const t of targets) {
+    const a = document.createElement('a');
+    a.href = '/api/download/' + t;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  closeSaveDialog();
+}
 document.getElementById('btn-pause').onclick = () => action('pause');
 document.getElementById('btn-quit').onclick = async () => {
   if (confirm('議事録を保存して終了しますか？')) {
@@ -437,7 +528,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target === cmdInput || e.target === chatInput) return;
   if (e.key === 'u') action('update?full=false');
   else if (e.key === 'f') action('update?full=true');
-  else if (e.key === 's') action('save');
+  else if (e.key === 's') action('save');   // ショートカット S は従来通り「クイック保存」（既存パスにtranscript_raw.txtを保存）
   else if (e.key === 'p') action('pause');
   else if (e.key === 'q') document.getElementById('btn-quit').click();
 });
@@ -453,6 +544,12 @@ class _CommandBody(BaseModel):
 
 class _ChatBody(BaseModel):
     message: str
+
+
+class _SaveBody(BaseModel):
+    filename: str | None = None
+    output_dir: str | None = None
+    kind: str = 'transcript'  # 'transcript' / 'minutes' / 'both'
 
 
 class WebUIServer:
@@ -541,9 +638,53 @@ class WebUIServer:
             return {'ok': True}
 
         @app.post('/api/save')
-        async def save_transcript() -> dict:
-            self._handle_save()
+        async def save_transcript(body: _SaveBody | None = None) -> dict:
+            self._handle_save(body)
             return {'ok': True}
+
+        @app.get('/api/save-defaults')
+        async def save_defaults() -> dict:
+            from datetime import datetime
+
+            stem = datetime.now().strftime(self.updater.filename_format) if self.updater else 'meeting'
+            output_dir = str(self.updater.output_dir) if self.updater else '.'
+            has_transcript = False
+            has_minutes = False
+            with self.lock:
+                has_transcript = len(self.transcripts) > 0
+            if self.updater is not None:
+                has_minutes = bool(self.updater.current_minutes)
+            return {
+                'filename': stem,
+                'output_dir': output_dir,
+                'has_transcript': has_transcript,
+                'has_minutes': has_minutes,
+            }
+
+        @app.get('/api/download/transcript')
+        async def download_transcript() -> Response:
+            with self.lock:
+                text = '\n'.join(str(t) for t in self.transcripts)
+            from datetime import datetime
+
+            stem = datetime.now().strftime(self.updater.filename_format) if self.updater else 'transcript'
+            return Response(
+                content=text,
+                media_type='text/plain; charset=utf-8',
+                headers={'Content-Disposition': f'attachment; filename="{stem}.txt"'},
+            )
+
+        @app.get('/api/download/minutes')
+        async def download_minutes() -> Response:
+            md = self.updater.get_current_minutes() if self.updater else ''
+            from datetime import datetime
+
+            stem = datetime.now().strftime(self.updater.filename_format) if self.updater else 'minutes'
+            return Response(
+                content=md,
+                media_type='text/markdown; charset=utf-8',
+                headers={'Content-Disposition': f'attachment; filename="{stem}.md"'},
+            )
 
         @app.post('/api/pause')
         async def toggle_pause() -> dict:
@@ -824,15 +965,61 @@ class WebUIServer:
             return ''
         return f' | コスト: ${cost:.4f}'
 
-    def _handle_save(self) -> None:
+    def _handle_save(self, body=None) -> None:  # noqa: ANN001
+        """文字起こしと議事録を保存する.
+
+        body=None or body にカスタム指定がなければ既存挙動（updater.save_transcript_only）。
+        body.filename / body.output_dir 指定時は任意のパスへ書き出す。
+        body.kind: 'transcript' / 'minutes' / 'both'
+        """
         with self.lock:
             transcripts_copy = list(self.transcripts)
-        if not transcripts_copy:
+
+        kind = (body.kind if body is not None else 'transcript') or 'transcript'
+        wants_transcript = kind in ('transcript', 'both')
+        wants_minutes = kind in ('minutes', 'both')
+
+        if wants_transcript and not transcripts_copy:
             self._log('まだ文字起こしがありません', 'warning')
+            if not wants_minutes:
+                return
+        if wants_minutes and (self.updater is None or not self.updater.current_minutes):
+            self._log('議事録がまだ生成されていません', 'warning')
+            if not wants_transcript or not transcripts_copy:
+                return
+
+        # カスタム指定なしなら既存挙動（後方互換、ショートカット S のクイック保存）
+        if body is None or (not body.filename and not body.output_dir):
+            try:
+                if transcripts_copy:
+                    path = self.updater.save_transcript_only(transcripts_copy)
+                    self._log(f'保存しました: {path}', 'success')
+            except Exception as e:  # noqa: BLE001
+                self._log(f'保存エラー: {e}', 'error')
             return
+
+        # カスタム保存
+        from pathlib import Path as _Path
+
         try:
-            path = self.updater.save_transcript_only(transcripts_copy)
-            self._log(f'保存しました: {path}', 'success')
+            target_dir = _Path(body.output_dir).expanduser().resolve() if body.output_dir else self.updater.output_dir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            stem = body.filename or self.start_time.strftime(self.updater.filename_format)
+
+            saved = []
+            if wants_transcript and transcripts_copy:
+                txt_path = target_dir / f'{stem}.txt'
+                txt_path.write_text('\n'.join(str(t) for t in transcripts_copy), encoding='utf-8')
+                saved.append(str(txt_path))
+            if wants_minutes and self.updater.current_minutes:
+                md_path = target_dir / f'{stem}.md'
+                md_path.write_text(self.updater.current_minutes, encoding='utf-8')
+                saved.append(str(md_path))
+
+            if saved:
+                self._log(f'保存しました: {" | ".join(saved)}', 'success')
+            else:
+                self._log('保存対象が空でした', 'warning')
         except Exception as e:  # noqa: BLE001
             self._log(f'保存エラー: {e}', 'error')
 
