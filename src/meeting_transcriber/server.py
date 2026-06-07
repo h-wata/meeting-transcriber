@@ -91,6 +91,16 @@ footer { padding: 8px 12px; background: #181825; border-top: 1px solid #313244; 
 #chat-typing { color: #6c7086; font-size: 11px; font-style: italic; padding: 4px 10px; }
 
 .empty { color: #6c7086; font-style: italic; text-align: center; padding: 30px 20px; }
+
+#shutdown-overlay { position: fixed; inset: 0; background: rgba(20,20,30,0.92); display: flex; align-items: center; justify-content: center; z-index: 9999; backdrop-filter: blur(4px); }
+.shutdown-modal { background: #1e1e30; border: 1px solid #45475a; border-radius: 12px; padding: 32px 40px; max-width: 600px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); text-align: center; color: #e0e6f3; }
+.shutdown-icon { font-size: 48px; color: #a6e3a1; margin-bottom: 8px; }
+.shutdown-modal h2 { font-size: 22px; margin-bottom: 12px; color: #cdd6f4; font-weight: 700; }
+.shutdown-stat { font-size: 13px; color: #94e2d5; margin-bottom: 16px; }
+.shutdown-path-label { font-size: 11px; color: #6c7086; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.shutdown-path { background: #11111b; border: 1px solid #313244; border-radius: 6px; padding: 10px 14px; font-family: "JetBrains Mono", monospace; font-size: 13px; color: #f5c2e7; word-break: break-all; margin-bottom: 16px; user-select: all; }
+.shutdown-error { background: #2d1b2a; border-left: 3px solid #f38ba8; padding: 8px 12px; margin: 12px 0; color: #f38ba8; font-size: 12px; text-align: left; }
+.shutdown-hint { font-size: 11px; color: #6c7086; margin-top: 20px; line-height: 1.5; }
 .empty button { margin-top: 12px; padding: 10px 20px; font-size: 14px; font-weight: 600; }
 .minutes-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; color: #89dceb; }
 .spinner { display: inline-block; width: 40px; height: 40px; border: 4px solid #313244; border-top-color: #89b4fa; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
@@ -308,11 +318,17 @@ function escapeHtml(s) {
 }
 
 let ws;
+let isShutdown = false;
 function connect() {
+  if (isShutdown) return;
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(proto + '://' + location.host + '/ws');
   ws.onopen = () => addLog('サーバーに接続しました', 'success');
-  ws.onclose = () => { addLog('接続が切れました。再接続します...', 'warning'); setTimeout(connect, 1500); };
+  ws.onclose = () => {
+    if (isShutdown) return;
+    addLog('接続が切れました。再接続します...', 'warning');
+    setTimeout(connect, 1500);
+  };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     switch (msg.type) {
@@ -333,10 +349,37 @@ function connect() {
       case 'minutes': updateMinutes(msg.markdown); break;
       case 'status': setStatus(msg.status); break;
       case 'chat': addChatEntry(msg.entry); break;
+      case 'shutdown_progress': addLog(msg.message, 'warning'); break;
+      case 'shutdown_complete': showShutdownModal(msg); break;
     }
   };
 }
 connect();
+
+function showShutdownModal(info) {
+  isShutdown = true;
+  const overlay = document.createElement('div');
+  overlay.id = 'shutdown-overlay';
+  const path = info.output_path || info.session_dir || '(保存されたファイルなし)';
+  const errorBlock = info.error
+    ? '<div class="shutdown-error">⚠ 保存中にエラーが発生: ' + escapeHtml(info.error) + '</div>'
+    : '';
+  const transcriptInfo = info.transcript_count > 0
+    ? '<div class="shutdown-stat">文字起こし: ' + info.transcript_count + ' 件</div>'
+    : '<div class="shutdown-stat">文字起こしなし</div>';
+  overlay.innerHTML =
+    '<div class="shutdown-modal">' +
+    '<div class="shutdown-icon">✔</div>' +
+    '<h2>会議を終了しました</h2>' +
+    transcriptInfo +
+    '<div class="shutdown-path-label">保存先:</div>' +
+    '<div class="shutdown-path" id="shutdown-path-text">' + escapeHtml(path) + '</div>' +
+    '<button class="primary" onclick="navigator.clipboard.writeText(document.getElementById(\'shutdown-path-text\').textContent); this.textContent=\'コピーしました\'">パスをコピー</button>' +
+    errorBlock +
+    '<div class="shutdown-hint">このタブは閉じて構いません。再起動するには再度 meeting-transcriber --web を実行してください。</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+}
 
 async function action(path) {
   try { await fetch('/api/' + path, {method: 'POST'}); }
@@ -920,6 +963,10 @@ class WebUIServer:
             return
         self._shutdown_event.set()
         self._running = False
+
+        # フロントに「終了処理中」を通知
+        self._broadcast({'type': 'shutdown_progress', 'message': '終了処理中...'})
+
         try:
             self.recorder.stop()
         except Exception:  # noqa: BLE001
@@ -928,7 +975,9 @@ class WebUIServer:
         with self.lock:
             transcripts_copy = list(self.transcripts)
 
+        save_error = None
         if transcripts_copy:
+            self._broadcast({'type': 'shutdown_progress', 'message': '議事録を保存中...'})
             try:
                 if self.config.transcript_only:
                     self.output_path = self.updater.save_transcript_only(transcripts_copy)
@@ -942,6 +991,23 @@ class WebUIServer:
                     self.output_path = self.updater.save(transcripts_copy)
             except Exception as e:  # noqa: BLE001
                 logging.error('保存エラー: %s', e)
+                save_error = str(e)
+
+        # 保存完了をフロントに通知（WebSocket切断前に最後に1回ブロードキャスト）
+        self._broadcast(
+            {
+                'type': 'shutdown_complete',
+                'output_path': str(self.output_path) if self.output_path else None,
+                'session_dir': str(self.updater.session_dir) if hasattr(self.updater, 'session_dir') else None,
+                'transcript_count': len(transcripts_copy),
+                'error': save_error,
+            }
+        )
+
+        # ブロードキャストを送り切るため少し待ってからサーバー停止
+        import time
+
+        time.sleep(0.8)
 
         if self._server is not None:
             self._server.should_exit = True
