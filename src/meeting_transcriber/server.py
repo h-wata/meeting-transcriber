@@ -29,11 +29,11 @@ INDEX_HTML = """<!DOCTYPE html>
 <title>Meeting Transcriber</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif; background: #1e1e2e; color: #cdd6f4; }
+html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif; background: #2a2a3c; color: #e0e6f3; }
 #app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
-header { padding: 8px 16px; background: #181825; border-bottom: 1px solid #313244; display: flex; justify-content: space-between; align-items: center; }
-header h1 { font-size: 14px; font-weight: 600; color: #89b4fa; }
-#status { font-size: 12px; color: #a6adc8; }
+header { padding: 14px 24px; background: linear-gradient(to right, #1a1a2e, #25253a); border-bottom: 2px solid #45475a; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+header h1 { font-size: 22px; font-weight: 700; color: #89b4fa; letter-spacing: 0.5px; display: flex; align-items: center; }
+#status { font-size: 13px; color: #cdd6f4; font-weight: 500; }
 #controls { display: flex; gap: 6px; }
 button { background: #313244; color: #cdd6f4; border: none; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
 button:hover { background: #45475a; }
@@ -42,9 +42,9 @@ button.primary:hover { background: #74c7ec; }
 button.danger { background: #f38ba8; color: #1e1e2e; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-main { display: grid; grid-template-columns: 1fr 1.6fr 1.1fr; gap: 8px; padding: 8px; overflow: hidden; }
-.panel { background: #181825; border: 1px solid #313244; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden; }
-.panel-header { padding: 6px 12px; background: #11111b; border-bottom: 1px solid #313244; font-size: 12px; font-weight: 600; color: #94e2d5; display: flex; justify-content: space-between; }
+main { display: grid; grid-template-columns: 1fr 1.6fr 1.1fr; gap: 10px; padding: 10px; overflow: hidden; }
+.panel { background: #1e1e30; border: 1px solid #45475a; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.panel-header { padding: 8px 14px; background: #15151f; border-bottom: 1px solid #45475a; font-size: 13px; font-weight: 600; color: #94e2d5; display: flex; justify-content: space-between; align-items: center; }
 .panel-body { flex: 1; overflow-y: auto; padding: 12px; }
 
 #left { display: grid; grid-template-rows: 1fr auto; gap: 8px; overflow: hidden; min-height: 0; }
@@ -91,7 +91,7 @@ footer { padding: 8px 12px; background: #181825; border-top: 1px solid #313244; 
 #chat-typing { color: #6c7086; font-size: 11px; font-style: italic; padding: 4px 10px; }
 
 .empty { color: #6c7086; font-style: italic; text-align: center; padding: 20px; }
-.pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #a6e3a1; margin-right: 6px; animation: pulse 2s infinite; }
+.pulse { display: inline-block; width: 11px; height: 11px; border-radius: 50%; background: #a6e3a1; margin-right: 10px; animation: pulse 2s infinite; box-shadow: 0 0 8px #a6e3a1; }
 .pulse.paused { background: #f9e2af; animation: none; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
