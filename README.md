@@ -63,6 +63,9 @@ sudo apt install ffmpeg          # Ubuntu/Debian
 brew install ffmpeg              # macOS
 ```
 
+オンライン会議の相手側音声を録音する方法・推奨機材は
+[`docs/audio-setup.md`](docs/audio-setup.md) を参照。
+
 ## セットアップ
 
 LLM バックエンドのいずれか1つを用意:
