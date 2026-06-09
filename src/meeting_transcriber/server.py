@@ -169,6 +169,7 @@ button.success:hover { background: #94e2d5; }
     </div>
     <div class="toolbar-group" style="margin-left: auto;">
       <button id="btn-reset" class="danger" title="保存してリセット (R)">保存してリセット<span class="key-hint">R</span></button>
+      <button id="btn-discard" class="warning" title="保存せずにリセット (D)">破棄リセット<span class="key-hint">D</span></button>
     </div>
   </div>
   <main>
@@ -526,6 +527,13 @@ function handleReset(msg) {
       copyValue: msg.output_path,
     });
     addLog('保存しました: ' + msg.output_path, 'success');
+  } else if (msg.discarded) {
+    showToast({
+      title: '破棄してリセットしました',
+      body: (msg.transcript_count || 0) + '件の文字起こしを破棄しました',
+      level: 'warning',
+      autoHideMs: 4000,
+    });
   } else {
     showToast({
       title: 'リセットしました',
@@ -596,6 +604,12 @@ document.getElementById('btn-reset').onclick = async () => {
     addLog('保存してリセット中...', 'warning');
   }
 };
+document.getElementById('btn-discard').onclick = async () => {
+  if (confirm('現在の文字起こし・議事録を保存せずに破棄してリセットします。よろしいですか？')) {
+    await action('discard');
+    addLog('破棄リセット中...', 'warning');
+  }
+};
 
 const cmdInput = document.getElementById('command-input');
 async function sendCommand() {
@@ -641,6 +655,7 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'p') action('pause');
   else if (e.key === 'g') document.getElementById('btn-start').click();
   else if (e.key === 'r') document.getElementById('btn-reset').click();
+  else if (e.key === 'd') document.getElementById('btn-discard').click();
 });
 </script>
 </body>
@@ -808,7 +823,12 @@ class WebUIServer:
 
         @app.post('/api/reset')
         async def reset_session() -> dict:
-            threading.Thread(target=self._do_reset, daemon=True).start()
+            threading.Thread(target=self._do_reset, args=(True,), daemon=True).start()
+            return {'ok': True}
+
+        @app.post('/api/discard')
+        async def discard_session() -> dict:
+            threading.Thread(target=self._do_reset, args=(False,), daemon=True).start()
             return {'ok': True}
 
         @app.post('/api/command')
@@ -1196,8 +1216,8 @@ class WebUIServer:
             self._log('録音を開始しました', 'success')
         self._broadcast_status()
 
-    def _do_reset(self) -> None:
-        """現在の議事録を保存して状態をクリアし、次の会議に備える."""
+    def _do_reset(self, save: bool = True) -> None:
+        """状態をクリアし次の会議に備える。save=True なら保存してから、save=False なら破棄してリセット."""
         # 録音停止
         try:
             self.recorder.stop()
@@ -1208,10 +1228,10 @@ class WebUIServer:
         with self.lock:
             transcripts_copy = list(self.transcripts)
 
-        # 保存（transcripts があれば）
+        # 保存（save=True かつ transcripts があれば）
         saved_path: str | None = None
         save_error: str | None = None
-        if transcripts_copy and self.updater is not None:
+        if save and transcripts_copy and self.updater is not None:
             try:
                 if self.config.transcript_only:
                     saved_path = str(self.updater.save_transcript_only(transcripts_copy))
@@ -1222,6 +1242,8 @@ class WebUIServer:
             except Exception as e:  # noqa: BLE001
                 logging.error('リセット時の保存エラー: %s', e)
                 save_error = str(e)
+        elif not save and transcripts_copy:
+            self._log(f'{len(transcripts_copy)}件の文字起こしを破棄しました', 'warning')
 
         # 状態クリア
         with self.lock:
@@ -1249,6 +1271,7 @@ class WebUIServer:
                 'type': 'reset',
                 'output_path': saved_path,
                 'transcript_count': len(transcripts_copy),
+                'discarded': not save and bool(transcripts_copy),
                 'error': save_error,
             }
         )
