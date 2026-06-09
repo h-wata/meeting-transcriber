@@ -128,6 +128,16 @@ footer { padding: 8px 12px; background: #181825; border-top: 1px solid #313244; 
 .pulse.paused { background: #f9e2af; animation: none; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
+#toast { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); background: #313244; color: #cdd6f4; padding: 16px 24px; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.6); border: 1px solid #45475a; z-index: 9999; max-width: 80%; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+#toast.visible { opacity: 1; pointer-events: auto; }
+#toast.success { border-left: 4px solid #a6e3a1; }
+#toast.warning { border-left: 4px solid #f9e2af; }
+#toast.error { border-left: 4px solid #f38ba8; }
+#toast .toast-title { font-weight: 600; margin-bottom: 6px; }
+#toast .toast-body { font-family: "JetBrains Mono", "Consolas", monospace; font-size: 12px; color: #a6adc8; word-break: break-all; }
+#toast .toast-actions { display: flex; gap: 8px; margin-top: 10px; }
+#toast button { padding: 6px 12px; font-size: 12px; }
+
 #toolbar { display: flex; gap: 16px; padding: 8px 12px; background: #11111b; border-bottom: 1px solid #313244; align-items: center; flex-wrap: wrap; }
 .toolbar-group { display: flex; align-items: center; gap: 4px; }
 .toolbar-label { color: #6c7086; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; padding-right: 6px; border-right: 1px solid #313244; margin-right: 4px; }
@@ -154,10 +164,11 @@ button.success:hover { background: #94e2d5; }
     </div>
     <div class="toolbar-group">
       <span class="toolbar-label">録音</span>
+      <button id="btn-start" class="primary" title="開始 (G)" style="display:none">開始<span class="key-hint">G</span></button>
       <button id="btn-pause" class="warning" title="一時停止 (P)">一時停止<span class="key-hint">P</span></button>
     </div>
     <div class="toolbar-group" style="margin-left: auto;">
-      <button id="btn-quit" class="danger" title="終了 (Q)">終了<span class="key-hint">Q</span></button>
+      <button id="btn-reset" class="danger" title="保存してリセット (R)">保存してリセット<span class="key-hint">R</span></button>
     </div>
   </div>
   <main>
@@ -259,7 +270,7 @@ let currentMinutesMarkdown = '';
 function updateMinutes(markdown) {
   currentMinutesMarkdown = markdown || '';
   if (!markdown) {
-    minutesContent.innerHTML = '<div class="empty">議事録はまだ生成されていません<br><button class="primary" onclick="document.getElementById(\'btn-full\').click()">[F] 今すぐ生成</button></div>';
+    minutesContent.innerHTML = `<div class="empty">議事録はまだ生成されていません<br><button class="primary" onclick="document.getElementById('btn-full').click()">[F] 今すぐ生成</button></div>`;
     return;
   }
   minutesContent.innerHTML = renderMarkdown(markdown);
@@ -295,18 +306,26 @@ function setStatus(s) {
   }
   isUpdating = nowUpdating;
 
-  // 一時停止/再開ボタンのトグル
+  // 録音状態（停止中なら開始ボタン、それ以外は一時停止/再開ボタンを表示）
+  const startBtn = document.getElementById('btn-start');
   const pauseBtn = document.getElementById('btn-pause');
-  if (s.paused) {
-    pauseBtn.innerHTML = '再開<span class="key-hint">P</span>';
-    pauseBtn.classList.remove('warning');
-    pauseBtn.classList.add('success');
-    pauseBtn.title = '再開 (P)';
+  if (s.stopped) {
+    startBtn.style.display = '';
+    pauseBtn.style.display = 'none';
   } else {
-    pauseBtn.innerHTML = '一時停止<span class="key-hint">P</span>';
-    pauseBtn.classList.remove('success');
-    pauseBtn.classList.add('warning');
-    pauseBtn.title = '一時停止 (P)';
+    startBtn.style.display = 'none';
+    pauseBtn.style.display = '';
+    if (s.paused) {
+      pauseBtn.innerHTML = '再開<span class="key-hint">P</span>';
+      pauseBtn.classList.remove('warning');
+      pauseBtn.classList.add('success');
+      pauseBtn.title = '再開 (P)';
+    } else {
+      pauseBtn.innerHTML = '一時停止<span class="key-hint">P</span>';
+      pauseBtn.classList.remove('success');
+      pauseBtn.classList.add('warning');
+      pauseBtn.title = '一時停止 (P)';
+    }
   }
 }
 
@@ -368,6 +387,7 @@ function connect() {
       case 'chat': addChatEntry(msg.entry); break;
       case 'shutdown_progress': addLog(msg.message, 'warning'); break;
       case 'shutdown_complete': showShutdownModal(msg); break;
+      case 'reset': handleReset(msg); break;
     }
   };
 }
@@ -391,7 +411,7 @@ function showShutdownModal(info) {
     transcriptInfo +
     '<div class="shutdown-path-label">保存先:</div>' +
     '<div class="shutdown-path" id="shutdown-path-text">' + escapeHtml(path) + '</div>' +
-    '<button class="primary" onclick="navigator.clipboard.writeText(document.getElementById(\'shutdown-path-text\').textContent); this.textContent=\'コピーしました\'">パスをコピー</button>' +
+    `<button class="primary" onclick="navigator.clipboard.writeText(document.getElementById('shutdown-path-text').textContent); this.textContent='コピーしました'">パスをコピー</button>` +
     errorBlock +
     '<div class="shutdown-hint">このタブは閉じて構いません。再起動するには再度 meeting-transcriber --web を実行してください。</div>' +
     '</div>';
@@ -484,11 +504,96 @@ async function doDownload() {
   }
   closeSaveDialog();
 }
+function handleReset(msg) {
+  // パネルを初期状態に戻す（次の会議の準備）
+  transcriptBody.innerHTML = '<div class="empty">開始ボタンを押して新しい会議を始めてください</div>';
+  transcriptInitialized = false;
+  currentMinutesMarkdown = '';
+  minutesContent.innerHTML = `<div class="empty">議事録はまだ生成されていません<br><button class="primary" onclick="document.getElementById('btn-full').click()">[F] 今すぐ生成</button></div>`;
+  chatBody.innerHTML = '<div class="empty">会議内容について質問できます</div>';
+  chatInitialized = false;
+  transcriptCount.textContent = '0 件';
+  updateCount.textContent = '更新: 0回';
+  if (msg.error) {
+    showToast({title: '保存に失敗しました', body: msg.error, level: 'error', autoHideMs: 0});
+    addLog('保存エラー: ' + msg.error, 'error');
+  } else if (msg.output_path) {
+    showToast({
+      title: '保存しました',
+      body: msg.output_path,
+      level: 'success',
+      autoHideMs: 8000,
+      copyValue: msg.output_path,
+    });
+    addLog('保存しました: ' + msg.output_path, 'success');
+  } else {
+    showToast({
+      title: 'リセットしました',
+      body: '保存対象がなかったため状態クリアのみ実施しました',
+      level: 'warning',
+      autoHideMs: 4000,
+    });
+    addLog('リセットしました（保存対象なし）', 'info');
+  }
+}
+
+let _toastTimer = null;
+function showToast({title, body, level, autoHideMs, copyValue}) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.className = level || '';
+  // textContent ベースで構築。copyValue / title / body は HTML/属性パースを経由しない
+  toast.replaceChildren();
+  const titleEl = document.createElement('div');
+  titleEl.className = 'toast-title';
+  titleEl.textContent = title || '';
+  toast.appendChild(titleEl);
+  if (body) {
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'toast-body';
+    bodyEl.textContent = body;
+    toast.appendChild(bodyEl);
+  }
+  const actions = document.createElement('div');
+  actions.className = 'toast-actions';
+  if (copyValue) {
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = 'パスをコピー';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(copyValue).then(() => { copyBtn.textContent = 'コピーしました'; });
+    });
+    actions.appendChild(copyBtn);
+  }
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '閉じる';
+  closeBtn.addEventListener('click', hideToast);
+  actions.appendChild(closeBtn);
+  toast.appendChild(actions);
+  // 次フレームで visible を付けてフェードイン
+  requestAnimationFrame(() => toast.classList.add('visible'));
+  if (_toastTimer) clearTimeout(_toastTimer);
+  if (autoHideMs && autoHideMs > 0) {
+    _toastTimer = setTimeout(hideToast, autoHideMs);
+  }
+}
+
+function hideToast() {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  toast.classList.remove('visible');
+  if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
+}
+
 document.getElementById('btn-pause').onclick = () => action('pause');
-document.getElementById('btn-quit').onclick = async () => {
-  if (confirm('議事録を保存して終了しますか？')) {
-    await action('quit');
-    addLog('終了処理中...', 'warning');
+document.getElementById('btn-start').onclick = () => action('start');
+document.getElementById('btn-reset').onclick = async () => {
+  if (confirm('議事録を保存してリセットしますか？')) {
+    await action('reset');
+    addLog('保存してリセット中...', 'warning');
   }
 };
 
@@ -534,7 +639,8 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'f') action('update?full=true');
   else if (e.key === 's') action('save');   // ショートカット S は従来通り「クイック保存」（既存パスにtranscript_raw.txtを保存）
   else if (e.key === 'p') action('pause');
-  else if (e.key === 'q') document.getElementById('btn-quit').click();
+  else if (e.key === 'g') document.getElementById('btn-start').click();
+  else if (e.key === 'r') document.getElementById('btn-reset').click();
 });
 </script>
 </body>
@@ -695,6 +801,16 @@ class WebUIServer:
             self._handle_pause()
             return {'ok': True}
 
+        @app.post('/api/start')
+        async def start_recording() -> dict:
+            self._handle_start()
+            return {'ok': True}
+
+        @app.post('/api/reset')
+        async def reset_session() -> dict:
+            threading.Thread(target=self._do_reset, daemon=True).start()
+            return {'ok': True}
+
         @app.post('/api/command')
         async def send_command(body: _CommandBody) -> dict:
             self._handle_command(body.instruction)
@@ -756,7 +872,10 @@ class WebUIServer:
             transcript_count = len(self.transcripts)
         elapsed = datetime.now() - self.start_time
         elapsed_str = str(elapsed).split('.')[0]
-        if self.recorder.is_paused():
+        stopped = not self.recorder.is_recording()
+        if stopped:
+            state = '待機中'
+        elif self.recorder.is_paused():
             state = '一時停止中'
         elif self._updating:
             state = '更新中'
@@ -768,6 +887,7 @@ class WebUIServer:
             'transcript_count': transcript_count,
             'update_count': self.updater.update_count if self.updater else 0,
             'paused': self.recorder.is_paused(),
+            'stopped': stopped,
             'cumulative_cost_usd': cost,
             'updating': self._updating,
         }
@@ -920,16 +1040,16 @@ class WebUIServer:
         if self.config.transcript_only:
             self._log('文字起こしのみモードのため議事録は生成されません', 'warning')
             return
-        if self._updating:
-            self._log('更新中です', 'warning')
-            return
+        # check と set を lock 内で原子的に行う（自動更新と手動更新の並走対策）
         with self.lock:
+            if self._updating:
+                self._log('更新中です', 'warning')
+                return
             transcripts_copy = list(self.transcripts)
-        if not transcripts_copy:
-            self._log('まだ文字起こしがありません', 'warning')
-            return
-
-        self._updating = True
+            if not transcripts_copy:
+                self._log('まだ文字起こしがありません', 'warning')
+                return
+            self._updating = True
         update_type = 'フル更新' if full else '差分更新'
         new_count = len(transcripts_copy) - self.updater.last_update_index
         self._log(
@@ -1037,6 +1157,9 @@ class WebUIServer:
             self._log(f'保存エラー: {e}', 'error')
 
     def _handle_pause(self) -> None:
+        if not self.recorder.is_recording():
+            self._log('録音が停止中です。開始ボタンを押してください', 'warning')
+            return
         if self.recorder.is_paused():
             self.recorder.resume()
             self._log('録音を再開しました', 'success')
@@ -1045,6 +1168,117 @@ class WebUIServer:
             self._log('録音を一時停止しました', 'warning')
         self._broadcast_status()
 
+    def _handle_start(self) -> None:
+        """停止中なら録音を開始、一時停止中なら再開する."""
+        if self.recorder.is_recording():
+            if self.recorder.is_paused():
+                self.recorder.resume()
+                self._log('録音を再開しました', 'success')
+            else:
+                self._log('既に録音中です', 'warning')
+            self._broadcast_status()
+            return
+        # 新しい会議としてタイマーをリセット
+        self.start_time = datetime.now()
+        # この時点で updater を新しい start_time で作り直し、新セッションディレクトリにする
+        # （前回の transcripts/minutes/state は _do_reset で既にクリア済み or 初回起動）
+        if self.updater is not None and self._running:
+            try:
+                self._reset_updater()
+            except Exception as e:  # noqa: BLE001
+                logging.warning('updater リセット失敗: %s', e)
+        if not self._running:
+            # 初回起動の場合のみワーカースレッドも立ち上げる（recorder.start もここで呼ばれる）
+            self._start_workers()
+        else:
+            # 既にワーカーが動いていればレコーダーだけ再起動すれば transcribe_loop が拾い始める
+            self.recorder.start()
+            self._log('録音を開始しました', 'success')
+        self._broadcast_status()
+
+    def _do_reset(self) -> None:
+        """現在の議事録を保存して状態をクリアし、次の会議に備える."""
+        # 録音停止
+        try:
+            self.recorder.stop()
+        except Exception:  # noqa: BLE001
+            pass
+
+        # スナップショット取得
+        with self.lock:
+            transcripts_copy = list(self.transcripts)
+
+        # 保存（transcripts があれば）
+        saved_path: str | None = None
+        save_error: str | None = None
+        if transcripts_copy and self.updater is not None:
+            try:
+                if self.config.transcript_only:
+                    saved_path = str(self.updater.save_transcript_only(transcripts_copy))
+                else:
+                    if not self.updater.current_minutes:
+                        self.updater.update(transcripts_copy, full=True)
+                    saved_path = str(self.updater.save(transcripts_copy))
+            except Exception as e:  # noqa: BLE001
+                logging.error('リセット時の保存エラー: %s', e)
+                save_error = str(e)
+
+        # 状態クリア
+        with self.lock:
+            self.transcripts.clear()
+            self.transcript_index = 0
+        self._chat_history = []
+        self._chat_last_transcript_index = 0
+        self._updating = False
+        self.output_path = None
+        # updater は次の _handle_start で新しい start_time で作り直す
+
+        # backend の session_id を新規発行（prompt cache を新会議扱いに）
+        for b in self._all_backends():
+            try:
+                b.reset_context()
+            except Exception:  # noqa: BLE001
+                pass
+
+        if save_error:
+            self._log(f'保存エラー: {save_error}', 'error')
+
+        # フロントへ通知（output_path が None なら「保存対象なし」扱い）
+        self._broadcast(
+            {
+                'type': 'reset',
+                'output_path': saved_path,
+                'transcript_count': len(transcripts_copy),
+                'error': save_error,
+            }
+        )
+        self._broadcast_status()
+
+    def _reset_updater(self) -> None:
+        """MinutesUpdater を新しい開始時刻で作り直す（新セッション扱い）."""
+        if self.updater is None:
+            return
+        from meeting_transcriber.minutes import MinutesUpdater
+
+        old = self.updater
+        self.updater = MinutesUpdater(
+            generator=old.generator,
+            output_dir=old.output_dir,
+            template=old.template,
+            start_time=self.start_time,
+            filename_format=old.filename_format,
+            version_history=old.version_history,
+            simple_mode=old.simple_mode,
+        )
+
+    def _all_backends(self) -> list:
+        backends = []
+        if self.updater is not None and self.updater.generator is not None:
+            backends.append(self.updater.generator.backend)
+        if self._chat_backend is not None:
+            backends.append(self._chat_backend)
+        return backends
+
     def _handle_command(self, instruction: str) -> None:
         if self.config.transcript_only:
             self._log('文字起こしのみモードのため指示を受け付けません', 'warning')
@@ -1052,10 +1286,11 @@ class WebUIServer:
         if not self.updater.current_minutes:
             self._log('議事録がまだ生成されていません。先に更新してください', 'warning')
             return
-        if self._updating:
-            self._log('更新中です。完了をお待ちください', 'warning')
-            return
-        self._updating = True
+        with self.lock:
+            if self._updating:
+                self._log('更新中です。完了をお待ちください', 'warning')
+                return
+            self._updating = True
         self._log(f'指示を送信中: {instruction}', 'info')
         self._broadcast_status()
         threading.Thread(
@@ -1105,6 +1340,17 @@ class WebUIServer:
             return f'【その後の新しい発言】\n{new_transcripts_text}\n\n【ユーザーからの質問】\n{message}'
         return message
 
+    _CHAT_SYSTEM_PROMPT = (
+        'あなたは会議に同席しているAIアシスタントです。'
+        'ユーザーは会議の最中に思いついた疑問や相談をしてきます。'
+        '日本語で、簡潔かつ具体的に回答してください。'
+        '議事録の生成や修正は別系統で行われるので、ここでは議事録を出力しないでください。'
+        '会議内容と直接関係ない一般的な質問（例: 用語の意味、最新情報、計算など）にも自然に答えてください。'
+        '最新情報や事実確認が必要な質問では web_search ツールを使って検索してください。'
+        '会議の文脈や常識で答えられる質問では検索しないでください。'
+        '検索結果を引用するときは URL を明示してください。'
+    )
+
     def _chat_task(self, message: str) -> None:
         try:
             self._ensure_chat_backend()
@@ -1112,7 +1358,6 @@ class WebUIServer:
             with self.lock:
                 transcripts_snapshot = list(self.transcripts)
 
-            is_first = self._chat_last_transcript_index == 0 and not self._chat_history
             new_entries = transcripts_snapshot[self._chat_last_transcript_index :]
             new_text = '\n'.join(str(t) for t in new_entries)
             self._chat_last_transcript_index = len(transcripts_snapshot)
@@ -1121,8 +1366,15 @@ class WebUIServer:
             self._chat_history.append(user_entry)
             self._broadcast({'type': 'chat', 'entry': user_entry})
 
-            prompt = self._build_chat_prompt(message, new_text, is_first)
-            response = self._chat_backend.generate(prompt)
+            # OpenAI 互換 backend なら multi-turn messages を直接組み立てて投げる
+            backend = self._chat_backend
+            if hasattr(backend, 'chat_with_tools'):
+                response = self._invoke_chat_with_history(message, new_text, transcripts_snapshot)
+            else:
+                # 単発 prompt 経路（Claude CLI など session_id を持つ backend 用）
+                is_first = len(self._chat_history) == 1
+                prompt = self._build_chat_prompt(message, new_text, is_first)
+                response = backend.generate(prompt)
 
             assistant_entry = {'role': 'assistant', 'message': response}
             self._chat_history.append(assistant_entry)
@@ -1133,6 +1385,66 @@ class WebUIServer:
             self._broadcast({'type': 'chat', 'entry': error_entry})
         finally:
             self._chat_in_progress = False
+
+    def _invoke_chat_with_history(
+        self,
+        user_message: str,
+        new_transcripts_text: str,
+        transcripts_snapshot: list,
+    ) -> str:
+        """会話履歴 + 文字起こしコンテキストを multi-turn messages で送って tool calling ループを回す."""
+        from meeting_transcriber.tools import TOOL_DEFINITIONS
+
+        # システム: チャット用の役割。議事録 system_prompt は使わない
+        # 文字起こしも 1 つの system にまとめる（vLLM/Qwen で複数 system が 400 を返すケース対策）
+        is_first_turn = len([h for h in self._chat_history if h.get('role') == 'assistant']) == 0
+        if is_first_turn:
+            transcript_block = '\n'.join(str(t) for t in transcripts_snapshot) or '（まだ発言がありません）'
+            system_content = f'{self._CHAT_SYSTEM_PROMPT}\n\n【現時点の会議文字起こし】\n{transcript_block}'
+        else:
+            extra = f'\n\n【前回応答以降の新規発言】\n{new_transcripts_text}' if new_transcripts_text else ''
+            system_content = f'{self._CHAT_SYSTEM_PROMPT}{extra}'
+        messages: list[dict] = [{'role': 'system', 'content': system_content}]
+
+        # これまでの会話を user/assistant で復元（error / 空メッセージは除外、最新 user は別途追加するので除外）
+        prior = [
+            h
+            for h in self._chat_history[:-1]
+            if h.get('role') in ('user', 'assistant') and (h.get('message') or '').strip()
+        ]
+        for h in prior:
+            messages.append({'role': h['role'], 'content': h['message']})
+
+        # 今回の user 質問
+        messages.append({'role': 'user', 'content': user_message})
+
+        def _on_tool_call(name: str, args_json: str, result: str) -> None:
+            preview = result[:200].replace('\n', ' ')
+            self._log(f'ツール実行: {name}({args_json}) → {preview}...', 'info')
+
+        def _on_iteration(**info) -> None:
+            self._log(
+                f'チャット iter={info["iteration"]} '
+                f'tool_calls={info["n_tool_calls"]} '
+                f'content={info["content_len"]}文字 '
+                f'reasoning={info["reasoning_len"]}文字 '
+                f'finish={info["finish_reason"]}',
+                'info',
+            )
+
+        result = self._chat_backend.chat_with_tools(
+            messages=messages,
+            tools=TOOL_DEFINITIONS,
+            on_tool_call=_on_tool_call,
+            on_iteration=_on_iteration,
+        )
+        if not result:
+            self._log(
+                'AI から空の応答が返りました。同じ質問でもう一度試すか、質問を言い換えてみてください',
+                'warning',
+            )
+            result = '(モデルが空の応答を返しました。もう一度試してください)'
+        return result
 
     def _command_task(self, instruction: str) -> None:
         prompt = f"""あなたは議事録修正アシスタントです。
@@ -1156,6 +1468,16 @@ class WebUIServer:
         finally:
             self._updating = False
             self._broadcast_status()
+
+    def _force_exit_after_timeout(self, timeout: float) -> None:
+        """指定秒数経っても落ちきらない場合に強制終了する."""
+        import os
+        import time
+
+        time.sleep(timeout)
+        if self._server is not None and not getattr(self._server, 'force_exit', False):
+            print(f'\n{timeout}秒経過したので強制終了します', flush=True)
+            os._exit(0)
 
     def _shutdown(self) -> None:
         """終了処理（別スレッドから呼ばれる）."""
@@ -1221,11 +1543,30 @@ class WebUIServer:
             log_level='warning',
             access_log=False,
         )
-        self._server = uvicorn.Server(config)
 
-        # SIGINT/SIGTERMで終了処理
+        outer = self
+
+        class _NoSignalServer(uvicorn.Server):
+            def install_signal_handlers(self) -> None:
+                # uvicorn の上書きを抑止して自前ハンドラを使う
+                return
+
+        self._server = _NoSignalServer(config)
+
+        # 1回目: 自前の _shutdown を別スレッドで起動（議事録保存などを実行）
+        # 2回目: 即座に強制終了
+        sigint_count = {'n': 0}
+
         def _signal_handler(_signum, _frame) -> None:
-            threading.Thread(target=self._shutdown, daemon=True).start()
+            sigint_count['n'] += 1
+            if sigint_count['n'] >= 2:
+                print('\n強制終了します', flush=True)
+                import os
+
+                os._exit(130)
+            print('\n終了処理中... (もう一度 Ctrl-C で強制終了)', flush=True)
+            threading.Thread(target=outer._force_exit_after_timeout, args=(8.0,), daemon=True).start()  # noqa: SLF001
+            threading.Thread(target=outer._shutdown, daemon=True).start()  # noqa: SLF001
 
         try:
             signal.signal(signal.SIGINT, _signal_handler)

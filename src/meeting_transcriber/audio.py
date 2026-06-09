@@ -136,6 +136,10 @@ class AudioRecorder:
         """一時停止中かどうかを返す."""
         return self._is_paused
 
+    def is_recording(self) -> bool:
+        """録音中かどうかを返す（stop していなければ True）."""
+        return self._is_recording
+
     def get_audio_chunk(self, timeout: float = 0.1) -> np.ndarray | None:
         """キューから音声チャンクを取得する."""
         try:

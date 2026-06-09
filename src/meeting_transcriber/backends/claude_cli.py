@@ -6,12 +6,14 @@ import json
 import logging
 import os
 import subprocess
+import threading
 import uuid
 
 from meeting_transcriber.backends.base import Backend
 
 # Claude CLI のエラーメッセージからセッション無効を判定するキーワード
-_SESSION_ERROR_KEYWORDS = ('session', 'context', 'token', 'too long', 'limit')
+# 'in use' / 'already' は session ID 衝突 (Session ID ... is already in use) を捕まえるため
+_SESSION_ERROR_KEYWORDS = ('session', 'context', 'token', 'too long', 'limit', 'in use', 'already')
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +29,22 @@ class ClaudeCLIBackend(Backend):
     --output-format json から total_cost_usd を取得して累計を可視化する。
     """
 
-    def __init__(self, session_id: str | None = None) -> None:
+    def __init__(
+        self,
+        session_id: str | None = None,
+        model: str | None = None,
+        allowed_tools: list[str] | None = None,
+    ) -> None:
         self.session_id = session_id
+        self.model = model  # None なら claude CLI のデフォルトモデルを使う
+        # claude CLI に許可するツール（例: ['WebSearch', 'WebFetch']）。None なら指定しない
+        self.allowed_tools = allowed_tools
         self._session_dead = False
         self._last_cost_usd = 0.0
         self._cumulative_cost_usd = 0.0
         self._call_count = 0
+        # 同一バックエンドの並走呼び出しを直列化（同 session-id の衝突を防ぐ）
+        self._call_lock = threading.Lock()
 
     @property
     def has_persistent_context(self) -> bool:
@@ -58,15 +70,36 @@ class ClaudeCLIBackend(Backend):
         return self._call_count
 
     def generate(self, prompt: str) -> str:
-        """プロンプトから議事録を生成する."""
+        """プロンプトから議事録を生成する.
+
+        セッションIDが --session-id 衝突等で無効になった場合、1度だけ
+        新しいセッションIDで自動リトライする。
+        """
+        # 同 session-id の並走を防ぐためバックエンド単位で直列化
+        with self._call_lock:
+            try:
+                return self._generate_once(prompt)
+            except RuntimeError:
+                # セッション衝突等で _session_dead が立ったなら、新しい UUID にリセットして1回だけ再試行
+                if self.session_id is not None and self._session_dead:
+                    self.reset_context()
+                    return self._generate_once(prompt)
+                raise
+
+    def _generate_once(self, prompt: str) -> str:
         # ANTHROPIC_API_KEY があるとAPI課金になるので一時的に除去
         # （Max プラン枠で動かすため OAuth/keychain にフォールバックさせる）
         env = os.environ.copy()
         env.pop('ANTHROPIC_API_KEY', None)
 
-        cmd = ['claude', '-p', prompt, '--output-format', 'json', '--model', 'sonnet']
+        cmd = ['claude', '-p', prompt, '--output-format', 'json']
+        if self.model:
+            cmd += ['--model', self.model]
         if self.has_persistent_context:
             cmd += ['--session-id', self.session_id]
+        if self.allowed_tools:
+            # 例: WebSearch,WebFetch（ユーザー確認なしで使えるようにする）
+            cmd += ['--allowed-tools', ','.join(self.allowed_tools)]
 
         result = subprocess.run(
             cmd,
@@ -82,7 +115,9 @@ class ClaudeCLIBackend(Backend):
             # セッション関連のエラーならセッションを破損扱いにして次回は新規UUIDで再生成
             if self.session_id is not None and any(k in stderr_lower for k in _SESSION_ERROR_KEYWORDS):
                 self._session_dead = True
-            raise RuntimeError(f'Claude CLI error: {result.stderr}')
+            # stderr が空でも stdout に手がかりがある場合があるので両方含める
+            detail = result.stderr.strip() or result.stdout.strip()[:500] or '(no output)'
+            raise RuntimeError(f'Claude CLI exited rc={result.returncode}: {detail}')
 
         return self._parse_json_response(result.stdout)
 

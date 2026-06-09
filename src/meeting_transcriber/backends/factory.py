@@ -69,7 +69,7 @@ def get_backend(config: Config, session_id: str | None = None) -> Backend:
         if not ClaudeCLIBackend.check_available():
             raise RuntimeError('Claude Code CLI が見つかりません')
         print('Claude Code CLI を使用します（Maxプラン）')
-        return ClaudeCLIBackend(session_id=session_id)
+        return ClaudeCLIBackend(session_id=session_id, model=config.claude_cli_model)
 
     # auto: 利用可能なバックエンドを自動選択
     # cloud OpenAI 互換は明示指定でのみ選ばれる（勝手に課金経路に倒さない）
@@ -84,7 +84,7 @@ def get_backend(config: Config, session_id: str | None = None) -> Backend:
 
     if ClaudeCLIBackend.check_available():
         print('Claude Code CLI を使用します（Maxプラン）')
-        return ClaudeCLIBackend(session_id=session_id)
+        return ClaudeCLIBackend(session_id=session_id, model=config.claude_cli_model)
 
     if os.environ.get('ANTHROPIC_API_KEY'):
         print('Anthropic API を使用します（従量課金）')

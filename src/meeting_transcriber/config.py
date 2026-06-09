@@ -115,6 +115,11 @@ class Config:
     # LLMバックエンド設定
     backend: str = 'auto'  # auto, api, claude-agent, claude-cli, local
     local_llm: LocalLLMConfig = field(default_factory=LocalLLMConfig)
+    # claude-cli バックエンド用モデル指定（None なら claude CLI のデフォルトを使う）
+    # 例: 'claude-sonnet-4-5', 'claude-sonnet-4-5-20250929', 'opus', 'sonnet'
+    # 注: 'sonnet' は claude CLI が最新版（claude-sonnet-4-6 等）に解決するため、
+    #     アカウントによってはアクセス権が無く 400 になる場合がある。
+    claude_cli_model: str | None = None
 
     # 出力設定
     output_dir: Path = field(default_factory=lambda: Path('./output'))
