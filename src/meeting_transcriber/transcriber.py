@@ -2,11 +2,56 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Iterable
 
 import numpy as np
 from faster_whisper import WhisperModel
+
+# Whisper が無音や雑音に対して頻繁に幻覚として吐く定型句を弾くための正規表現群。
+# 完全一致ではなく「セグメントの全体がほぼこの文だけ」のときだけ弾きたいので
+# 前後の句読点・空白・絵文字を許容する形にしている。
+# パターン構築用パーツ
+_LEAD_JP = r'^[\s。、・！!？?☆★♪♫　]*'  # 行頭の空白・句読点・装飾
+_TAIL_JP = r'[\s。、！!？?]*$'  # 行末の空白・句読点
+_LEAD_EN = r'^[\s.,!?]*'
+_TAIL_EN = r'[\s.,!?]*$'
+_THANKS = r'ありがとう(?:ございました|ございます)'
+_PROMO_NOUN = r'(?:高評価|いいね|チャンネル登録|フォロー)'
+_PROMO_TAIL = r'\s*(?:を)?(?:よろしく)?(?:お願いします|お願い致します|お願いいたします)?'
+
+_HALLUCINATION_PATTERNS = [
+    re.compile(p)
+    for p in (
+        # 日本語: 動画系の定型お礼（ご視聴 / ご清聴）
+        _LEAD_JP + r'ご視聴(?:いただき)?' + _THANKS + _TAIL_JP,
+        _LEAD_JP + r'ご清聴(?:いただき)?' + _THANKS + _TAIL_JP,
+        # 「最後まで(ご)?視聴…ありがとうございました」系
+        _LEAD_JP
+        + r'最後まで(?:ご)?(?:視聴|見て|お聞き)(?:して)?(?:いただき|くださり|くださって)?'
+        + _THANKS
+        + _TAIL_JP,
+        # 「チャンネル登録（と高評価）（よろしく）お願いします」のバリエーション
+        _LEAD_JP + _PROMO_NOUN + rf'(?:[、と・や]+{_PROMO_NOUN})*' + _PROMO_TAIL + _TAIL_JP,
+        # 字幕クレジット / ノイズ表示
+        _LEAD_JP + r'字幕(?:制作|作成)(?:[:：])?\s*\S+$',
+        _LEAD_JP + r'Subtitles? by\s.+$',
+        _LEAD_JP + r'\[?(?:音楽|拍手|笑い声|BGM)\]?' + _TAIL_JP,
+        # 英語 YouTube 系定型
+        _LEAD_EN + r'Thanks? (?:for|to) watching' + _TAIL_EN,
+        _LEAD_EN + r'Please (?:subscribe|like and subscribe)' + _TAIL_EN,
+        _LEAD_EN + r"Don'?t forget to (?:subscribe|like)" + _TAIL_EN,
+    )
+]
+
+
+def _looks_like_hallucination(text: str) -> bool:
+    """Whisper の定型ハルシネーションに合致するか判定."""
+    if not text:
+        return False
+    stripped = text.strip()
+    return any(p.match(stripped) for p in _HALLUCINATION_PATTERNS)
 
 
 def _detect_cuda_available() -> bool:
@@ -68,13 +113,20 @@ class Transcriber:
                 'min_silence_duration_ms': 300,
                 'speech_pad_ms': 100,
             },
+            # 前のセグメントを context として渡すと「ご視聴ありがとうございました」等のループが
+            # 後続セグメントに伝染しやすい。リアルタイム短窓ではオフが安全
+            condition_on_previous_text=False,
         )
 
         texts = []
         for segment in segments:
             text = segment.text.strip()
-            if text:
-                texts.append(text)
+            if not text:
+                continue
+            if _looks_like_hallucination(text):
+                # 既知の定型ハルシネーション（無音/雑音時に出る「ご視聴ありがとうございました」等）は破棄
+                continue
+            texts.append(text)
 
         return ' '.join(texts)
 
@@ -103,6 +155,7 @@ class Transcriber:
                 'min_silence_duration_ms': 300,
                 'speech_pad_ms': 100,
             },
+            condition_on_previous_text=False,
         )
 
         duration = info.duration
@@ -110,6 +163,8 @@ class Transcriber:
         for segment in segments:
             text = segment.text.strip()
             if not text:
+                continue
+            if _looks_like_hallucination(text):
                 continue
             if progress_callback is not None:
                 progress_callback(segment.start, duration)
