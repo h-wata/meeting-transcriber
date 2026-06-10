@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import re
+import secrets
 import signal
 import threading
 import uuid
@@ -720,6 +722,15 @@ class WebUIServer:
         self._chat_history: list[dict] = []
         self._chat_in_progress = False
 
+        # HTTP Basic 認証 + セッションクッキー
+        # config.web_password が None / 空文字 のときは認証オフ（loopback 運用前提）
+        self._auth_username = (config.web_username or 'user').strip() or 'user'
+        password = (config.web_password or '').strip() if config.web_password else ''
+        self._auth_password = password or None
+        # サーバープロセス毎に発行する乱数。WebSocket とブラウザ間の認証維持に使う
+        self._session_token = secrets.token_urlsafe(32) if self._auth_password else None
+        self._auth_cookie_name = 'mt_auth'
+
         self._allowed_origins = {
             f'http://{self.host}:{self.port}',
             f'http://127.0.0.1:{self.port}',
@@ -739,6 +750,28 @@ class WebUIServer:
     def _host_allowed(self, host: str | None) -> bool:
         return host is not None and host in self._allowed_hosts
 
+    def _check_basic_auth(self, request: Request) -> bool:
+        """Verify Authorization: Basic ヘッダの user:pass を検証する."""
+        if not self._auth_password:
+            return True
+        auth = request.headers.get('authorization', '')
+        if not auth.lower().startswith('basic '):
+            return False
+        try:
+            decoded = base64.b64decode(auth[6:]).decode('utf-8')
+        except Exception:  # noqa: BLE001
+            return False
+        user, sep, pwd = decoded.partition(':')
+        if not sep:
+            return False
+        return secrets.compare_digest(user, self._auth_username) and secrets.compare_digest(pwd, self._auth_password)
+
+    def _check_session_cookie(self, request_or_ws) -> bool:  # noqa: ANN001
+        if not self._auth_password or self._session_token is None:
+            return True
+        cookie = request_or_ws.cookies.get(self._auth_cookie_name)
+        return cookie is not None and secrets.compare_digest(cookie, self._session_token)
+
     def _build_app(self) -> FastAPI:
         app = FastAPI(title='Meeting Transcriber')
 
@@ -751,7 +784,29 @@ class WebUIServer:
             if request.method not in ('GET', 'HEAD', 'OPTIONS'):
                 if not self._origin_allowed(request.headers.get('origin')):
                     return JSONResponse({'error': 'origin not allowed'}, status_code=403)
-            return await call_next(request)
+            # 認証チェック: パスワード設定時のみ
+            if self._auth_password:
+                if not (self._check_session_cookie(request) or self._check_basic_auth(request)):
+                    return Response(
+                        content='Authentication required',
+                        status_code=401,
+                        headers={
+                            'WWW-Authenticate': 'Basic realm="Meeting Transcriber"',
+                            'Content-Type': 'text/plain; charset=utf-8',
+                        },
+                    )
+            response = await call_next(request)
+            # 認証成功時はセッションクッキーを発行/更新（WebSocket でも認証維持できるように）
+            if self._auth_password and self._session_token is not None:
+                response.set_cookie(
+                    self._auth_cookie_name,
+                    self._session_token,
+                    httponly=True,
+                    samesite='strict',
+                    max_age=60 * 60 * 24,
+                    path='/',
+                )
+            return response
 
         @app.get('/', response_class=HTMLResponse)
         async def index() -> str:
@@ -853,6 +908,11 @@ class WebUIServer:
                 await ws.close(code=1008)
                 return
             if not self._host_allowed(ws.headers.get('host')):
+                await ws.close(code=1008)
+                return
+            # 認証: ブラウザは ws upgrade で Basic auth を送らないので、Cookie で検証する
+            # (HTTP リクエスト時の middleware で set_cookie 済みのはず)
+            if self._auth_password and not self._check_session_cookie(ws):
                 await ws.close(code=1008)
                 return
             await ws.accept()
@@ -1598,6 +1658,12 @@ class WebUIServer:
             pass
 
         print(f'Web UI: http://{self.host}:{self.port}')
+        if self._auth_password:
+            print(f'  認証: HTTP Basic 有効 (user: {self._auth_username})')
+        else:
+            print('  認証: 無効（config.web_password 未設定）')
+            if self.host not in ('127.0.0.1', 'localhost'):
+                print(f'  ⚠ {self.host} で LAN 公開しているのに認証が無効です。config.web_password を設定してください')
         self._server.run()
 
         if self.output_path:

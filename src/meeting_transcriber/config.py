@@ -121,6 +121,12 @@ class Config:
     #     アカウントによってはアクセス権が無く 400 になる場合がある。
     claude_cli_model: str | None = None
 
+    # Web UI 認証
+    # web_password が未設定（None or 空文字）なら認証オフ（loopback 運用前提）
+    # web_password が設定されていれば HTTP Basic 認証 + セッションクッキーで保護
+    web_username: str = 'user'
+    web_password: str | None = None
+
     # 出力設定
     output_dir: Path = field(default_factory=lambda: Path('./output'))
     filename_format: str = 'meeting_%Y%m%d_%H%M%S'
