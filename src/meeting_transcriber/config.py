@@ -156,6 +156,10 @@ class Config:
     )
     hotword_min_question_length: int = 3  # ホットワード後のテキストがこの文字数未満なら無視
 
+    # ホワイトボード設定
+    whiteboard: bool = False
+    whiteboard_port: int = 8765
+
     def get_output_path(self) -> Path:
         """実際の出力先パスを取得."""
         if self.simple_output_dir:
@@ -226,6 +230,8 @@ class Config:
             'hotwords_enabled': self.hotwords_enabled,
             'hotwords': self.hotwords,
             'hotword_min_question_length': self.hotword_min_question_length,
+            'whiteboard': self.whiteboard,
+            'whiteboard_port': self.whiteboard_port,
         }
         for key, value in kwargs.items():
             if value is not None:
