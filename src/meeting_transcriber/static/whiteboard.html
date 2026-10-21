@@ -677,7 +677,7 @@
         html += `
           <div class="wb-section">
             <div class="wb-section-header">
-              <span class="color-dot" style="background: ${section.color || '#6c7cff'}"></span>
+              <span class="color-dot" style="background: ${safeColor(section.color)}"></span>
               ${escapeHtml(section.title)}
             </div>
             <div class="wb-section-items">
@@ -736,11 +736,16 @@
       return;
     }
 
-    container.innerHTML = `
-      <div class="lp-container">
-        <div class="lp-content">${html}</div>
-      </div>
-    `;
+    // LLM 生成 HTML は会議の発話から誘導され得るため、スクリプト無効の sandbox iframe に隔離して表示
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', '');
+    frame.className = 'lp-content';
+    frame.style.cssText = 'width: 100%; min-height: 500px; border: 0; display: block;';
+    frame.srcdoc = html;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'lp-container';
+    wrapper.appendChild(frame);
+    container.replaceChildren(wrapper);
   }
 
   // Transcript
@@ -802,6 +807,10 @@
   });
 
   // Utils
+  function safeColor(c) {
+    return /^#[0-9a-fA-F]{3,8}$/.test(c || '') ? c : '#6c7cff';
+  }
+
   function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;

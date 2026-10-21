@@ -159,6 +159,7 @@ class Config:
     # ホワイトボード設定
     whiteboard: bool = False
     whiteboard_port: int = 8765
+    whiteboard_host: str = '127.0.0.1'  # LAN に公開する場合のみ '0.0.0.0'（認証なしのため注意）
 
     def get_output_path(self) -> Path:
         """実際の出力先パスを取得."""
@@ -232,6 +233,7 @@ class Config:
             'hotword_min_question_length': self.hotword_min_question_length,
             'whiteboard': self.whiteboard,
             'whiteboard_port': self.whiteboard_port,
+            'whiteboard_host': self.whiteboard_host,
         }
         for key, value in kwargs.items():
             if value is not None:

@@ -8,6 +8,7 @@ import logging
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from aiohttp import web
 
@@ -26,7 +27,7 @@ class WhiteboardServer:
     def __init__(
         self,
         backend: Backend,
-        host: str = '0.0.0.0',
+        host: str = '127.0.0.1',
         port: int = 8765,
     ) -> None:
         self.host = host
@@ -54,7 +55,7 @@ class WhiteboardServer:
         self._loop.run_until_complete(self._start_app())
 
     async def _start_app(self) -> None:
-        """aiohttp アプリケーションを起動."""
+        """Aiohttp アプリケーションを起動."""
         app = web.Application()
         app.router.add_get('/ws', self._handle_websocket)
         app.router.add_get('/', self._handle_index)
@@ -84,6 +85,11 @@ class WhiteboardServer:
 
     async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
         """WebSocket接続を処理."""
+        # 他サイトからの WebSocket 接続（CSWSH）を拒否: Origin が自ホストと一致するものだけ許可
+        origin = request.headers.get('Origin')
+        if origin and urlparse(origin).netloc != request.host:
+            raise web.HTTPForbidden()
+
         ws = web.WebSocketResponse()
         await ws.prepare(request)
 
@@ -95,17 +101,21 @@ class WhiteboardServer:
 
         # 現在の状態を新しいクライアントに送信
         state = self.engine.state.to_dict()
-        await ws.send_json({
-            'type': 'state',
-            'data': state,
-            'clients': client_count,
-        })
+        await ws.send_json(
+            {
+                'type': 'state',
+                'data': state,
+                'clients': client_count,
+            }
+        )
 
         # クライアント数を全員に通知
-        await self._broadcast({
-            'type': 'clients',
-            'count': client_count,
-        })
+        await self._broadcast(
+            {
+                'type': 'clients',
+                'count': client_count,
+            }
+        )
 
         try:
             async for msg in ws:
@@ -120,10 +130,12 @@ class WhiteboardServer:
 
             logger.info('Client disconnected (total: %d)', client_count)
 
-            await self._broadcast({
-                'type': 'clients',
-                'count': client_count,
-            })
+            await self._broadcast(
+                {
+                    'type': 'clients',
+                    'count': client_count,
+                }
+            )
 
         return ws
 
@@ -139,11 +151,13 @@ class WhiteboardServer:
         if msg_type == 'request_state':
             # 状態をリクエスト
             state = self.engine.state.to_dict()
-            await ws.send_json({
-                'type': 'state',
-                'data': state,
-                'clients': len(self._clients),
-            })
+            await ws.send_json(
+                {
+                    'type': 'state',
+                    'data': state,
+                    'clients': len(self._clients),
+                }
+            )
 
         elif msg_type == 'cursor':
             # カーソル位置をブロードキャスト（送信元以外）
@@ -190,11 +204,13 @@ class WhiteboardServer:
                 state = self.engine.state.to_dict()
                 if self._loop and self._loop.is_running():
                     asyncio.run_coroutine_threadsafe(
-                        self._broadcast({
-                            'type': 'state',
-                            'data': state,
-                            'clients': len(self._clients),
-                        }),
+                        self._broadcast(
+                            {
+                                'type': 'state',
+                                'data': state,
+                                'clients': len(self._clients),
+                            }
+                        ),
                         self._loop,
                     )
             except Exception:
@@ -208,10 +224,12 @@ class WhiteboardServer:
         """文字起こしテキストをリアルタイムで送信."""
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(
-                self._broadcast({
-                    'type': 'transcript',
-                    'text': text,
-                }),
+                self._broadcast(
+                    {
+                        'type': 'transcript',
+                        'text': text,
+                    }
+                ),
                 self._loop,
             )
 

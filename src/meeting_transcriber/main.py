@@ -79,6 +79,7 @@ class MeetingTranscriber:
 
             self.whiteboard_server = WhiteboardServer(
                 backend=self.backend,
+                host=config.whiteboard_host,
                 port=config.whiteboard_port,
             )
 
